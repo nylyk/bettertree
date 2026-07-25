@@ -33,7 +33,8 @@ diff_removed = "red"
 ui_selection_bg = "dark_gray"
 ui_status_bar_bg = "black"
 ui_status_bar_fg = "white"
-ui_hint = "gray"             # the message line, command descriptions, "…" on unloaded folders
+ui_accent = "blue"
+ui_muted_fg = "gray"
 
 # Keys are `C-`, `S-` and `A-` prefixes plus a character or one of:
 # up down left right home end pgup pgdn enter tab space backspace esc del insert

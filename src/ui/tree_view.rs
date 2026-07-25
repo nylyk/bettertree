@@ -60,7 +60,7 @@ fn line(node: &Node, layout: Layout, config: &Config, git: &GitInfo) -> Line<'st
     if layout.open && !node.is_loaded() {
         left.push(Span::styled(
             " …",
-            Style::default().fg(config.colors.ui_hint.0),
+            Style::default().fg(config.colors.ui_muted_fg.0),
         ));
     }
 

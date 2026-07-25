@@ -51,7 +51,7 @@ pub fn render(config: &Config, scroll: usize, frame: &mut Frame, area: Rect) {
             Span::raw(format!("{name:name_width$}  ")),
             Span::styled(
                 entry.description.to_owned(),
-                Style::default().fg(config.colors.ui_hint.0),
+                Style::default().fg(config.colors.ui_muted_fg.0),
             ),
         ])
     }));

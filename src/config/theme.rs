@@ -17,7 +17,8 @@ pub struct Theme {
     pub ui_selection_bg: Paint,
     pub ui_status_bar_bg: Paint,
     pub ui_status_bar_fg: Paint,
-    pub ui_hint: Paint,
+    pub ui_accent: Paint,
+    pub ui_muted_fg: Paint,
 }
 
 /// ANSI names rather than hex, so the defaults follow whatever palette the terminal is themed with.
@@ -37,7 +38,8 @@ impl Default for Theme {
             ui_selection_bg: Paint(Color::DarkGray),
             ui_status_bar_bg: Paint(Color::Black),
             ui_status_bar_fg: Paint(Color::White),
-            ui_hint: Paint(Color::Gray),
+            ui_accent: Paint(Color::LightCyan),
+            ui_muted_fg: Paint(Color::Gray),
         }
     }
 }

@@ -44,7 +44,7 @@ fn render_message(app: &App, frame: &mut Frame, area: ratatui::layout::Rect) {
 
     frame.render_widget(
         Paragraph::new(format!(" {message}"))
-            .style(Style::default().fg(app.config.colors.ui_hint.0)),
+            .style(Style::default().fg(app.config.colors.ui_muted_fg.0)),
         area,
     );
 }

@@ -59,7 +59,7 @@ fn render_candidates(line: &CommandLine, config: &Config, frame: &mut Frame, tre
                 ),
                 Span::styled(
                     format!("  {}", entry.description),
-                    Style::default().fg(config.colors.ui_hint.0),
+                    Style::default().fg(config.colors.ui_muted_fg.0),
                 ),
             ]);
 
