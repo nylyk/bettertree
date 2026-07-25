@@ -263,10 +263,10 @@ impl App {
             Command::MoveParent => self.tree.move_parent(),
             Command::MoveFirst => self.tree.select_row(0),
             Command::MoveLast => self.tree.move_last(),
-            Command::ScrollDown => self.scroll_by(self.config.scroll_lines as isize),
-            Command::ScrollUp => self.scroll_by(-(self.config.scroll_lines as isize)),
-            Command::HalfPageDown => self.scroll_by((self.viewport_height / 2) as isize),
-            Command::HalfPageUp => self.scroll_by(-((self.viewport_height / 2) as isize)),
+            Command::JumpDown => self.move_cursor_by(self.config.jump_lines as isize),
+            Command::JumpUp => self.move_cursor_by(-(self.config.jump_lines as isize)),
+            Command::HalfPageDown => self.move_cursor_by((self.viewport_height / 2) as isize),
+            Command::HalfPageUp => self.move_cursor_by(-((self.viewport_height / 2) as isize)),
             Command::CenterCursor => self.center_cursor(),
             Command::Select => self.select(),
             Command::ExpandAll => self.expand_all(),
@@ -589,7 +589,7 @@ impl App {
         }
     }
 
-    fn scroll_by(&mut self, delta: isize) {
+    fn move_cursor_by(&mut self, delta: isize) {
         let row = self.tree.selected_row().saturating_add_signed(delta);
         self.tree
             .select_row(row.min(self.tree.rows().len().saturating_sub(1)));

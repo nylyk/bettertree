@@ -9,8 +9,8 @@ use crate::git::DiffStat;
 
 pub fn render(app: &App, frame: &mut Frame, area: Rect) {
     let base = Style::default()
-        .fg(app.config.colors.status_bar_fg.0)
-        .bg(app.config.colors.status_bar_bg.0);
+        .fg(app.config.colors.ui_status_bar_fg.0)
+        .bg(app.config.colors.ui_status_bar_bg.0);
 
     let mut spans = vec![Span::raw(format!(" {}", app.root.display()))];
 

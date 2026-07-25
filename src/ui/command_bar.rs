@@ -18,7 +18,7 @@ pub fn render(
     let prompt = Line::from(vec![
         Span::raw(":"),
         Span::raw(line.input().to_owned()),
-        Span::styled("█", Style::default().fg(config.colors.directory.0)),
+        Span::raw("█"),
     ]);
     frame.render_widget(Paragraph::new(prompt), prompt_area);
 
@@ -59,12 +59,12 @@ fn render_candidates(line: &CommandLine, config: &Config, frame: &mut Frame, tre
                 ),
                 Span::styled(
                     format!("  {}", entry.description),
-                    Style::default().fg(config.colors.ignored.0),
+                    Style::default().fg(config.colors.ui_hint.0),
                 ),
             ]);
 
             match index == line.selected() {
-                true => row.style(Style::default().bg(config.colors.selection_bg.0)),
+                true => row.style(Style::default().bg(config.colors.ui_selection_bg.0)),
                 false => row,
             }
         })

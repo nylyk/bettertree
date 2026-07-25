@@ -60,7 +60,7 @@ fn line(node: &Node, layout: Layout, config: &Config, git: &GitInfo) -> Line<'st
     if layout.open && !node.is_loaded() {
         left.push(Span::styled(
             " …",
-            Style::default().fg(config.colors.ignored.0),
+            Style::default().fg(config.colors.ui_hint.0),
         ));
     }
 
@@ -74,7 +74,7 @@ fn line(node: &Node, layout: Layout, config: &Config, git: &GitInfo) -> Line<'st
     let line = Line::from(spans);
 
     match layout.selected {
-        true => line.style(Style::default().bg(config.colors.selection_bg.0)),
+        true => line.style(Style::default().bg(config.colors.ui_selection_bg.0)),
         false => line,
     }
 }
@@ -83,15 +83,13 @@ fn name_style(node: &Node, config: &Config, git: &GitInfo) -> Style {
     let colors = &config.colors;
 
     let color = match git.file(&node.path) {
-        Some(status) if status.conflicted => colors.conflicted.0,
-        Some(status) if status.untracked => colors.untracked.0,
-        Some(status) if status.unstaged.is_some() => colors.modified.0,
-        Some(_) => colors.staged.0,
-        None if node.kind.is_dir() && git.directory(&node.path).is_some() => {
-            colors.directory_dirty.0
-        }
-        None if node.ignored == Some(true) => colors.ignored.0,
-        None if node.kind.is_dir() => colors.directory.0,
+        Some(status) if status.conflicted => colors.file_conflicted.0,
+        Some(status) if status.untracked => colors.file_untracked.0,
+        Some(status) if status.unstaged.is_some() => colors.file_modified.0,
+        Some(_) => colors.file_staged.0,
+        None if node.kind.is_dir() && git.directory(&node.path).is_some() => colors.dir_changed.0,
+        None if node.ignored == Some(true) => colors.file_ignored.0,
+        None if node.kind.is_dir() => colors.dir.0,
         None => colors.file.0,
     };
 
@@ -138,10 +136,10 @@ fn decorations(node: &Node, open: bool, config: &Config, git: &GitInfo) -> Vec<S
 
 fn code_color(node: &Node, config: &Config, git: &GitInfo) -> Color {
     match git.file(&node.path) {
-        Some(status) if status.conflicted => config.colors.conflicted.0,
-        Some(status) if status.untracked => config.colors.untracked.0,
-        Some(status) if status.unstaged.is_some() => config.colors.modified.0,
-        Some(_) => config.colors.staged.0,
+        Some(status) if status.conflicted => config.colors.file_conflicted.0,
+        Some(status) if status.untracked => config.colors.file_untracked.0,
+        Some(status) if status.unstaged.is_some() => config.colors.file_modified.0,
+        Some(_) => config.colors.file_staged.0,
         None => config.colors.file.0,
     }
 }

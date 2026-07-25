@@ -18,7 +18,7 @@ const DEFAULT_CONFIG: &str = include_str!("default_config.toml");
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
     pub editor: String,
-    pub scroll_lines: usize,
+    pub jump_lines: usize,
     pub scrolloff: usize,
     pub icons: Icons,
     pub sort_order: SortOrder,
@@ -34,8 +34,8 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             editor: String::new(),
-            scroll_lines: 10,
-            scrolloff: 3,
+            jump_lines: 10,
+            scrolloff: 10,
             icons: Icons::default(),
             sort_order: SortOrder::default(),
             show_diffstat: true,
@@ -115,7 +115,7 @@ mod tests {
     fn the_shipped_default_config_parses() {
         let config: Config = toml::from_str(DEFAULT_CONFIG).expect("default config is valid");
 
-        assert_eq!(config.scroll_lines, 10);
+        assert_eq!(config.jump_lines, 10);
         assert_eq!(config.icons, Icons::Nerdfont);
     }
 
@@ -132,22 +132,22 @@ mod tests {
         assert_eq!(shipped.watch, fallback.watch);
 
         let roles: [(&str, theme::Paint, theme::Paint); 5] = [
-            (
-                "directory",
-                shipped.colors.directory,
-                fallback.colors.directory,
-            ),
             ("file", shipped.colors.file, fallback.colors.file),
-            ("ignored", shipped.colors.ignored, fallback.colors.ignored),
             (
-                "selection_bg",
-                shipped.colors.selection_bg,
-                fallback.colors.selection_bg,
+                "file_ignored",
+                shipped.colors.file_ignored,
+                fallback.colors.file_ignored,
+            ),
+            ("dir", shipped.colors.dir, fallback.colors.dir),
+            (
+                "ui_selection_bg",
+                shipped.colors.ui_selection_bg,
+                fallback.colors.ui_selection_bg,
             ),
             (
-                "status_bar_bg",
-                shipped.colors.status_bar_bg,
-                fallback.colors.status_bar_bg,
+                "ui_status_bar_bg",
+                shipped.colors.ui_status_bar_bg,
+                fallback.colors.ui_status_bar_bg,
             ),
         ];
 
@@ -160,8 +160,8 @@ mod tests {
     fn the_default_theme_uses_ansi_names_so_it_follows_the_terminal() {
         let config: Config = toml::from_str(DEFAULT_CONFIG).expect("default config is valid");
 
-        assert_eq!(config.colors.directory.0, ratatui::style::Color::Blue);
-        assert_eq!(config.colors.modified.0, ratatui::style::Color::Yellow);
+        assert_eq!(config.colors.dir.0, ratatui::style::Color::Blue);
+        assert_eq!(config.colors.file_modified.0, ratatui::style::Color::Yellow);
         assert_eq!(config.colors.file.0, ratatui::style::Color::Reset);
 
         for line in DEFAULT_CONFIG.lines() {

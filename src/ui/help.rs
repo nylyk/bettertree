@@ -46,12 +46,12 @@ pub fn render(config: &Config, scroll: usize, frame: &mut Frame, area: Rect) {
         Line::from(vec![
             Span::styled(
                 format!(" {keys:key_width$}  "),
-                Style::default().fg(config.colors.staged.0),
+                Style::default().add_modifier(Modifier::BOLD),
             ),
             Span::raw(format!("{name:name_width$}  ")),
             Span::styled(
                 entry.description.to_owned(),
-                Style::default().fg(config.colors.ignored.0),
+                Style::default().fg(config.colors.ui_hint.0),
             ),
         ])
     }));

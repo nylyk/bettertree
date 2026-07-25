@@ -3,8 +3,8 @@
 # Run `bt`, press `?` for the list of commands, or type `:` to run one by name.
 
 editor = ""                   # empty = $EDITOR, then $VISUAL, then "vi"
-scroll_lines = 10             # lines moved by scroll_down / scroll_up
-scrolloff = 3                 # keep this many lines of context above/below the cursor
+jump_lines = 10               # entries moved by jump_down / jump_up
+scrolloff = 10                # keep this many lines of context above/below the cursor
 icons = "nerdfont"            # "nerdfont" = file-type glyphs, "unicode" = ▸/▾ only, "none" = +/-
 sort_order = "folders_first"  # "folders_first" | "mixed" | "files_first" | "type"
 show_diffstat = true          # per-file +n -m on tree rows
@@ -20,37 +20,38 @@ changed_only = false
 # The defaults are ANSI names so they follow your terminal palette. Any of these also takes
 # "#rrggbb" for an exact colour, or "reset" for the terminal's own foreground/background.
 [colors]
-directory = "blue"
-directory_dirty = "yellow"
 file = "reset"
-modified = "yellow"
-staged = "green"
-added = "green"
-deleted = "red"
-untracked = "green"
-ignored = "dark_gray"
-conflicted = "light_red"
-selection_bg = "dark_gray"
-status_bar_bg = "blue"
-status_bar_fg = "white"
+file_modified = "yellow"
+file_staged = "green"
+file_untracked = "green"
+file_ignored = "gray"
+file_conflicted = "light_red"
+dir = "blue"
+dir_changed = "yellow"
 diff_added = "green"
 diff_removed = "red"
+ui_selection_bg = "dark_gray"
+ui_status_bar_bg = "black"
+ui_status_bar_fg = "white"
+ui_hint = "gray"             # the message line, command descriptions, "…" on unloaded folders
 
 # Keys are `C-`, `S-` and `A-` prefixes plus a character or one of:
 # up down left right home end pgup pgdn enter tab space backspace esc del insert
 # Write shifted characters directly, so `G` rather than `S-g`.
 [keys]
-"down" = "move_down"
-"j" = "move_down"
 "up" = "move_up"
 "k" = "move_up"
-">" = "move_next_sibling"
-"<" = "move_prev_sibling"
+"down" = "move_down"
+"j" = "move_down"
+"C-up" = "move_prev_sibling"
+"C-k" = "move_prev_sibling"
+"C-down" = "move_next_sibling"
+"C-j" = "move_next_sibling"
 "left" = "move_parent"
 "h" = "move_parent"
 "enter" = "select"
-"pgdn" = "scroll_down"
-"pgup" = "scroll_up"
+"pgup" = "jump_up"
+"pgdn" = "jump_down"
 "e" = "expand_all"
 "c" = "collapse_all"
 "." = "toggle_hidden"
@@ -59,18 +60,3 @@ diff_removed = "red"
 "?" = "help"
 "q" = "quit"
 "C-c" = "quit"
-
-# Optional extras, uncomment to enable:
-# "right" = "select"
-# "l" = "select"
-# "home" = "move_first"
-# "g" = "move_first"
-# "end" = "move_last"
-# "G" = "move_last"
-# "C-d" = "half_page_down"
-# "C-u" = "half_page_up"
-# "z" = "center_cursor"
-# "o" = "open"
-# "r" = "refresh"
-# "y" = "yank_path"
-# "Y" = "yank_relative_path"

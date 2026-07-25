@@ -4,42 +4,40 @@ use serde::de::{Deserialize, Deserializer, Error};
 #[derive(Debug, serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Theme {
-    pub directory: Paint,
-    pub directory_dirty: Paint,
     pub file: Paint,
-    pub modified: Paint,
-    pub staged: Paint,
-    pub added: Paint,
-    pub deleted: Paint,
-    pub untracked: Paint,
-    pub ignored: Paint,
-    pub conflicted: Paint,
-    pub selection_bg: Paint,
-    pub status_bar_bg: Paint,
-    pub status_bar_fg: Paint,
+    pub file_modified: Paint,
+    pub file_staged: Paint,
+    pub file_untracked: Paint,
+    pub file_ignored: Paint,
+    pub file_conflicted: Paint,
+    pub dir: Paint,
+    pub dir_changed: Paint,
     pub diff_added: Paint,
     pub diff_removed: Paint,
+    pub ui_selection_bg: Paint,
+    pub ui_status_bar_bg: Paint,
+    pub ui_status_bar_fg: Paint,
+    pub ui_hint: Paint,
 }
 
 /// ANSI names rather than hex, so the defaults follow whatever palette the terminal is themed with.
 impl Default for Theme {
     fn default() -> Self {
         Self {
-            directory: Paint(Color::Blue),
-            directory_dirty: Paint(Color::Yellow),
             file: Paint(Color::Reset),
-            modified: Paint(Color::Yellow),
-            staged: Paint(Color::Green),
-            added: Paint(Color::Green),
-            deleted: Paint(Color::Red),
-            untracked: Paint(Color::Green),
-            ignored: Paint(Color::DarkGray),
-            conflicted: Paint(Color::LightRed),
-            selection_bg: Paint(Color::DarkGray),
-            status_bar_bg: Paint(Color::Blue),
-            status_bar_fg: Paint(Color::White),
+            file_modified: Paint(Color::Yellow),
+            file_staged: Paint(Color::Green),
+            file_untracked: Paint(Color::Green),
+            file_ignored: Paint(Color::Gray),
+            file_conflicted: Paint(Color::LightRed),
+            dir: Paint(Color::Blue),
+            dir_changed: Paint(Color::Yellow),
             diff_added: Paint(Color::Green),
             diff_removed: Paint(Color::Red),
+            ui_selection_bg: Paint(Color::DarkGray),
+            ui_status_bar_bg: Paint(Color::Black),
+            ui_status_bar_fg: Paint(Color::White),
+            ui_hint: Paint(Color::Gray),
         }
     }
 }
