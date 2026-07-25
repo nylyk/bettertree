@@ -37,6 +37,10 @@ decorations, and drive every action through a `:command` bar with fuzzy completi
   watermark; only a new git snapshot re-marks everything. Loading a large tree must stay linear.
 - **The watcher must ignore `EventKind::Access`.** inotify reports opens, and bettertree reads the
   directories it watches, so a rescan would otherwise trigger the next one forever.
+- **Handing the terminal to a child process has two halves, and both matter.** Call
+  `Events::suspend()` first: the input thread has to be off stdin, or it and the child split the
+  user's keystrokes. And do *not* leave the alternate screen, the child switches to it itself, so
+  staying put keeps the shell from flashing into view.
 
 ## Code style
 

@@ -117,7 +117,12 @@ impl App {
 
             if let Some(path) = self.pending_open.take() {
                 self.save();
-                if let Err(err) = editor::open(terminal, &path, &self.config.editor) {
+
+                self.events.suspend();
+                let opened = editor::open(terminal, &path, &self.config.editor);
+                self.events.resume();
+
+                if let Err(err) = opened {
                     self.message = Some(format!("{err:#}"));
                 }
                 self.refresh_git();

@@ -1,10 +1,18 @@
+use std::io::stdout;
 use std::path::Path;
 use std::process::Command;
 
 use anyhow::{Context, Result, bail};
+use crossterm::cursor::{Hide, Show};
+use crossterm::execute;
+use crossterm::terminal::{EnterAlternateScreen, disable_raw_mode, enable_raw_mode};
 use ratatui::DefaultTerminal;
 
-/// Leaves the TUI, runs the editor in the same terminal, then restores the TUI.
+/// Runs the editor in this terminal and restores the TUI afterwards.
+///
+/// The alternate screen is deliberately *not* left first: the editor switches to it itself, so
+/// staying put means the shell never becomes visible in between. Callers must hand over stdin
+/// first, see `Events::suspend`.
 pub fn open(terminal: &mut DefaultTerminal, path: &Path, configured: &str) -> Result<()> {
     let command = resolve(configured);
     let mut parts = command.split_whitespace();
@@ -14,9 +22,14 @@ pub fn open(terminal: &mut DefaultTerminal, path: &Path, configured: &str) -> Re
     };
     let args: Vec<&str> = parts.collect();
 
-    ratatui::restore();
+    disable_raw_mode()?;
+    execute!(stdout(), Show)?;
+
     let status = Command::new(program).args(args).arg(path).status();
-    *terminal = ratatui::init();
+
+    // An editor that used the alternate screen has just left it, so claim it back either way.
+    enable_raw_mode()?;
+    execute!(stdout(), EnterAlternateScreen, Hide)?;
     terminal.clear()?;
 
     let status = status.with_context(|| format!("failed to run {program}"))?;
