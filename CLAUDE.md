@@ -44,7 +44,7 @@ decorations, and drive every action through a `:command` bar with fuzzy completi
   trait for a single implementor, no generics until a second caller exists.
 - **Clean code always**, not as a later pass: small functions that do one thing, descriptive
   names, shallow nesting (early returns over `else` ladders), no dead code, no commented-out code.
-- **Comments only when the code cannot explain itself** — a non-obvious invariant, a subtle `gix`
+- **Comments only when the code cannot explain itself**: a non-obvious invariant, a subtle `gix`
   or `notify` behavior, a deliberate deviation. Never restate what a line does; if a comment is
   needed to explain *what*, rename or extract instead.
 - **Blank lines separate logical ideas inside functions.** Group the steps of an operation, blank

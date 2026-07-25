@@ -60,7 +60,7 @@ diff_removed = "red"
 "q" = "quit"
 "C-c" = "quit"
 
-# Optional extras — uncomment to enable:
+# Optional extras, uncomment to enable:
 # "right" = "select"
 # "l" = "select"
 # "home" = "move_first"

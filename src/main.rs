@@ -16,7 +16,7 @@ use std::process::ExitCode;
 use anyhow::{Context, Result, bail};
 
 const HELP: &str = "\
-bt — an interactive file tree
+bt: an interactive file tree
 
 Usage: bt [PATH]
 

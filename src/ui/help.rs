@@ -58,7 +58,7 @@ pub fn render(config: &Config, scroll: usize, frame: &mut Frame, area: Rect) {
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(" commands — `:` runs one by name, esc closes ");
+        .title(" commands: `:` runs one by name, esc closes ");
 
     frame.render_widget(Clear, area);
     frame.render_widget(Paragraph::new(lines).block(block), area);
