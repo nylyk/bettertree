@@ -1,0 +1,76 @@
+# bettertree config
+#
+# Run `bt`, press `?` for the list of commands, or type `:` to run one by name.
+
+editor = ""                   # empty = $EDITOR, then $VISUAL, then "vi"
+scroll_lines = 10             # lines moved by scroll_down / scroll_up
+scrolloff = 3                 # keep this many lines of context above/below the cursor
+icons = "nerdfont"            # "nerdfont" = file-type glyphs, "unicode" = ▸/▾ only, "none" = +/-
+sort_order = "folders_first"  # "folders_first" | "mixed" | "files_first" | "type"
+show_diffstat = true          # per-file +n -m on tree rows
+indent = 2
+watch = true                  # watch the loaded tree for filesystem changes
+
+# Startup defaults, used only for projects that have no saved state yet.
+[toggles]
+show_hidden = false
+show_gitignored = false
+changed_only = false
+
+# The defaults are ANSI names so they follow your terminal palette. Any of these also takes
+# "#rrggbb" for an exact colour, or "reset" for the terminal's own foreground/background.
+[colors]
+directory = "blue"
+directory_dirty = "yellow"
+file = "reset"
+modified = "yellow"
+staged = "green"
+added = "green"
+deleted = "red"
+untracked = "green"
+ignored = "dark_gray"
+conflicted = "light_red"
+selection_bg = "dark_gray"
+status_bar_bg = "blue"
+status_bar_fg = "white"
+diff_added = "green"
+diff_removed = "red"
+
+# Keys are `C-`, `S-` and `A-` prefixes plus a character or one of:
+# up down left right home end pgup pgdn enter tab space backspace esc del insert
+# Write shifted characters directly, so `G` rather than `S-g`.
+[keys]
+"down" = "move_down"
+"j" = "move_down"
+"up" = "move_up"
+"k" = "move_up"
+">" = "move_next_sibling"
+"<" = "move_prev_sibling"
+"left" = "move_parent"
+"h" = "move_parent"
+"enter" = "select"
+"pgdn" = "scroll_down"
+"pgup" = "scroll_up"
+"e" = "expand_all"
+"c" = "collapse_all"
+"." = "toggle_hidden"
+"i" = "toggle_gitignored"
+"m" = "toggle_changed_only"
+"?" = "help"
+"q" = "quit"
+"C-c" = "quit"
+
+# Optional extras — uncomment to enable:
+# "right" = "select"
+# "l" = "select"
+# "home" = "move_first"
+# "g" = "move_first"
+# "end" = "move_last"
+# "G" = "move_last"
+# "C-d" = "half_page_down"
+# "C-u" = "half_page_up"
+# "z" = "center_cursor"
+# "o" = "open"
+# "r" = "refresh"
+# "y" = "yank_path"
+# "Y" = "yank_relative_path"
