@@ -1,7 +1,15 @@
 [package]
 name = "bettertree"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
+description = "An interactive terminal file tree driven like Helix"
+authors = ["nylyk"]
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/nylyk/bettertree"
+keywords = ["tui", "file-tree", "terminal", "explorer", "git"]
+categories = ["command-line-utilities"]
+exclude = ["flake.nix", "flake.lock", "CLAUDE.md"]
 
 [[bin]]
 name = "bt"

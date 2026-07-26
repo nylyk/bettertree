@@ -1,6 +1,6 @@
 # bettertree
 
-An interactive terminal file tree that feels like VSCode's explorer but is driven like Helix.
+An interactive terminal file tree driven like Helix.
 Binary name: `bt`. Open it in a project directory, navigate and expand/collapse folders, see git
 decorations, and drive every action through a `:command` bar with fuzzy completion.
 
