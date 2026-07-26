@@ -3,7 +3,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
-use crossterm::event::{Event as TerminalEvent, KeyCode, KeyEvent, KeyEventKind};
+use crossterm::event::{Event as TerminalEvent, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::DefaultTerminal;
 
 use crate::clipboard;
@@ -13,6 +13,7 @@ use crate::config::{Config, Toggles};
 use crate::editor;
 use crate::events::{Event, Events};
 use crate::git::{self, GitInfo, Ignores};
+use crate::search::{self, Search};
 use crate::state::State;
 use crate::tree::scan::{Entry, Scanner};
 use crate::tree::watch::Watcher;
@@ -22,10 +23,14 @@ use crate::ui;
 /// A stray `:expand_all` on a huge tree stops here instead of locking up the UI.
 const EXPAND_ALL_LIMIT: usize = 20_000;
 
+/// Search reads the folders it has not seen yet, and stops reading once the project is this big.
+const SEARCH_LOAD_LIMIT: usize = 50_000;
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
     Normal,
     Command,
+    Search,
     Help,
 }
 
@@ -35,6 +40,9 @@ pub struct App {
     pub config: Config,
     pub mode: Mode,
     pub command_line: CommandLine,
+    pub search: Search,
+    /// Where the cursor was when the search opened, so cancelling puts it back.
+    search_return: Option<NodeId>,
     pub help_scroll: usize,
     pub scroll: usize,
     pub message: Option<String>,
@@ -67,6 +75,8 @@ impl App {
             config,
             mode: Mode::Normal,
             command_line: CommandLine::new(),
+            search: Search::default(),
+            search_return: None,
             help_scroll: 0,
             scroll: 0,
             message: None,
@@ -98,6 +108,9 @@ impl App {
         while !self.quit {
             if self.tree.needs_ignore_classification() {
                 self.ignores.classify(&mut self.tree);
+            }
+            if self.mode == Mode::Search {
+                self.load_unread_folders();
             }
             self.tree.refresh_rows();
             self.viewport_height = usize::from(terminal.size()?.height)
@@ -208,28 +221,31 @@ impl App {
         match self.mode {
             Mode::Normal => self.handle_normal_key(key),
             Mode::Command => self.handle_command_key(key),
+            Mode::Search => self.handle_search_key(key),
             Mode::Help => self.handle_help_key(key),
         }
     }
 
     fn handle_normal_key(&mut self, key: KeyEvent) {
-        // `:` is the way into the command bar, so it is never rebindable.
-        if key.code == KeyCode::Char(':') {
-            self.message = None;
-            self.command_line.open();
-            self.mode = Mode::Command;
-            return;
-        }
-
         if let Some(command) = self.config.keys.get(key) {
             self.dispatch(command);
         }
     }
 
     fn handle_command_key(&mut self, key: KeyEvent) {
-        match self.command_line.handle_key(key) {
+        if let Some(command) = self.prompt_command(key) {
+            self.dispatch(command);
+            return;
+        }
+
+        let outcome = self.command_line.handle_key(key);
+        self.command_line_outcome(outcome);
+    }
+
+    fn command_line_outcome(&mut self, outcome: Outcome) {
+        match outcome {
             Outcome::Continue => {}
-            Outcome::Cancel => self.mode = Mode::Normal,
+            Outcome::Cancel => self.dispatch(Command::Dismiss),
             Outcome::Error(message) => self.message = Some(message),
             Outcome::Run(command) => {
                 self.mode = Mode::Normal;
@@ -238,17 +254,37 @@ impl App {
         }
     }
 
-    fn handle_help_key(&mut self, key: KeyEvent) {
-        match key.code {
-            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('?') => self.mode = Mode::Normal,
-            KeyCode::Down | KeyCode::Char('j') => self.help_scroll += 1,
-            KeyCode::Up | KeyCode::Char('k') => {
-                self.help_scroll = self.help_scroll.saturating_sub(1)
-            }
-            _ => {}
+    fn handle_search_key(&mut self, key: KeyEvent) {
+        if let Some(command) = self.prompt_command(key) {
+            self.dispatch(command);
+            return;
         }
 
-        self.help_scroll = self.help_scroll.min(REGISTRY.len().saturating_sub(1));
+        match self.search.handle_key(key) {
+            search::Outcome::Continue => {}
+            search::Outcome::Edited => self.requery(),
+            search::Outcome::Accept => self.dispatch(Command::Select),
+            search::Outcome::Cancel => self.dispatch(Command::Dismiss),
+        }
+    }
+
+    /// The overlay has no input of its own, so every key it knows reaches the keymap.
+    fn handle_help_key(&mut self, key: KeyEvent) {
+        if let Some(command) = self.config.keys.get(key).filter(acts_on_top) {
+            self.dispatch(command);
+        }
+    }
+
+    /// What a prompt lets through to the keymap. A key it can take as input is input, so binding
+    /// a letter never stops it from being typed.
+    fn prompt_command(&self, key: KeyEvent) -> Option<Command> {
+        let typed = matches!(key.code, KeyCode::Char(_))
+            && key.modifiers.difference(KeyModifiers::SHIFT).is_empty();
+
+        match typed {
+            true => None,
+            false => self.config.keys.get(key).filter(acts_on_top),
+        }
     }
 
     /// The single place where a command becomes an action; keys and the command bar both land here.
@@ -256,8 +292,8 @@ impl App {
         self.message = None;
 
         match command {
-            Command::MoveDown => self.tree.move_by(1),
-            Command::MoveUp => self.tree.move_by(-1),
+            Command::MoveDown => self.move_by(1),
+            Command::MoveUp => self.move_by(-1),
             Command::MoveNextSibling => self.tree.move_next_sibling(),
             Command::MovePrevSibling => self.tree.move_prev_sibling(),
             Command::MoveParent => self.tree.move_parent(),
@@ -268,152 +304,91 @@ impl App {
             Command::HalfPageDown => self.move_cursor_by((self.viewport_height / 2) as isize),
             Command::HalfPageUp => self.move_cursor_by(-((self.viewport_height / 2) as isize)),
             Command::CenterCursor => self.center_cursor(),
+
             Command::Select => self.select(),
+            Command::Open => self.open_selected(),
             Command::ExpandAll => self.expand_all(),
             Command::CollapseAll => self.collapse_all(),
-            Command::Open => self.open_selected(),
             Command::YankPath => self.yank(YankKind::Absolute),
             Command::YankRelativePath => self.yank(YankKind::Relative),
+
             Command::ToggleHidden => self.toggle(Toggle::Hidden),
             Command::ToggleGitignored => self.toggle(Toggle::Gitignored),
             Command::ToggleChangedOnly => self.toggle(Toggle::ChangedOnly),
             Command::Refresh => self.refresh(),
+
+            Command::OpenCommandBar => self.open_command_bar(),
+            Command::Search => self.open_search(),
+            Command::Dismiss => self.dismiss(),
             Command::Help => self.show_help(),
             Command::Quit => self.quit = true,
         }
     }
 
-    fn mark_changed(&mut self) {
-        let Self { tree, git, .. } = self;
-
-        tree.mark_changed(&mut |path| git.has_changes(path));
-    }
-
-    fn mark_all_changed(&mut self) {
-        let Self { tree, git, .. } = self;
-
-        tree.mark_all_changed(&mut |path| git.has_changes(path));
-    }
-
-    fn toggle(&mut self, toggle: Toggle) {
-        if toggle.needs_git() && !self.git.is_repo() {
-            self.message = Some("not a git repository".to_owned());
-            return;
-        }
-
-        match toggle {
-            Toggle::Hidden => self.toggles.show_hidden = !self.toggles.show_hidden,
-            Toggle::Gitignored => self.toggles.show_gitignored = !self.toggles.show_gitignored,
-            Toggle::ChangedOnly => self.toggles.changed_only = !self.toggles.changed_only,
-        }
-
-        self.apply_filter();
-    }
-
-    fn apply_filter(&mut self) {
-        self.tree.set_filter(Filter {
-            show_hidden: self.toggles.show_hidden,
-            show_gitignored: self.toggles.show_gitignored,
-            changed_only: self.toggles.changed_only,
-        });
-
-        if self.toggles.changed_only {
-            self.load_changed_directories();
+    /// Moving walks whatever list is on top: the help overlay, the completions, the results of
+    /// a running search, or the tree.
+    fn move_by(&mut self, delta: isize) {
+        match self.mode {
+            Mode::Help => self.scroll_help(delta),
+            Mode::Command => self.command_line.highlight(delta),
+            Mode::Search => self.tree.move_to_match(delta),
+            Mode::Normal => self.tree.move_by(delta),
         }
     }
 
-    /// `changed_only` can reveal folders that were never expanded, so their contents are loaded
-    /// on demand rather than being left as empty rows.
-    fn load_changed_directories(&mut self) {
-        let pending: Vec<PathBuf> = self
+    fn scroll_help(&mut self, delta: isize) {
+        self.help_scroll = self
+            .help_scroll
+            .saturating_add_signed(delta)
+            .min(REGISTRY.len().saturating_sub(1));
+    }
+
+    fn move_cursor_by(&mut self, delta: isize) {
+        let row = self.tree.selected_row().saturating_add_signed(delta);
+        self.tree
+            .select_row(row.min(self.tree.rows().len().saturating_sub(1)));
+    }
+
+    fn center_cursor(&mut self) {
+        self.scroll = self
             .tree
-            .iter()
-            .filter(|(_, node)| node.changed && node.kind.is_dir() && !node.is_loaded())
-            .map(|(_, node)| node.path.clone())
-            .collect();
-
-        for path in pending {
-            self.scanner.request(path, self.config.sort_order);
-        }
+            .selected_row()
+            .saturating_sub(self.viewport_height / 2);
     }
 
-    /// Re-reads every loaded directory and the git status. The watcher normally keeps both up to
-    /// date; this is the manual path for `watch = false` and for anything the watcher missed.
-    fn refresh(&mut self) {
-        let loaded: Vec<PathBuf> = self
-            .tree
-            .iter()
-            .filter(|(_, node)| node.kind.is_dir() && node.is_loaded())
-            .map(|(_, node)| node.path.clone())
-            .collect();
+    /// Keeps the cursor inside the viewport with `scrolloff` lines of context where possible.
+    fn clamp_scroll(&mut self) {
+        let rows = self.tree.rows().len();
+        let cursor = self.tree.selected_row();
+        let scrolloff = self
+            .config
+            .scrolloff
+            .min(self.viewport_height.saturating_sub(1) / 2);
 
-        for path in loaded {
-            self.scanner.request(path, self.config.sort_order);
+        if cursor < self.scroll + scrolloff {
+            self.scroll = cursor.saturating_sub(scrolloff);
+        }
+        if cursor + scrolloff >= self.scroll + self.viewport_height {
+            self.scroll = cursor + scrolloff + 1 - self.viewport_height;
         }
 
-        self.refresh_git();
+        self.scroll = self.scroll.min(rows.saturating_sub(self.viewport_height));
     }
 
-    /// Re-reads the directories that changed on disk, and the git status when `.git` was touched.
-    fn fs_change(&mut self, paths: Vec<PathBuf>) {
-        let mut directories: HashSet<PathBuf> = HashSet::new();
-        let mut git_touched = false;
-
-        for path in paths {
-            if is_inside_git_dir(&path) {
-                git_touched = true;
-                continue;
-            }
-
-            let parents = [path.parent(), Some(path.as_path())];
-            for parent in parents.into_iter().flatten() {
-                if self
-                    .tree
-                    .find(parent)
-                    .is_some_and(|id| self.tree.node(id).is_loaded())
-                {
-                    directories.insert(parent.to_path_buf());
-                }
-            }
-        }
-
-        for path in directories {
-            self.scanner.request(path, self.config.sort_order);
-        }
-
-        if git_touched {
-            self.refresh_git();
-        }
-    }
-
-    fn refresh_git(&mut self) {
-        self.git_pending = true;
-        git::spawn(self.root.clone(), self.events.sender());
-    }
-
-    fn git_done(&mut self, result: Result<GitInfo>) {
-        self.git_pending = false;
-
-        match result {
-            Ok(info) => self.git = info,
-            Err(err) => self.message = Some(format!("git: {err:#}")),
-        }
-
-        // A restored `changed_only` would hide everything outside a repository.
-        if !self.git.is_repo() {
-            self.toggles.changed_only = false;
-        }
-
-        self.mark_all_changed();
-        self.apply_filter();
-    }
-
-    fn show_help(&mut self) {
-        self.help_scroll = 0;
-        self.mode = Mode::Help;
-    }
-
+    /// Taking whatever the cursor is on: a candidate, a result, or an entry of the tree.
     fn select(&mut self) {
+        match self.mode {
+            Mode::Command => {
+                let outcome = self.command_line.run();
+                self.command_line_outcome(outcome);
+            }
+            Mode::Search => self.select_match(),
+            Mode::Help => {}
+            Mode::Normal => self.select_entry(),
+        }
+    }
+
+    fn select_entry(&mut self) {
         let id = self.tree.selected();
         let node = self.tree.node(id);
 
@@ -428,11 +403,6 @@ impl App {
         }
     }
 
-    fn collapse(&mut self, id: NodeId) {
-        self.expanding.clear();
-        self.tree.set_expanded(id, false);
-    }
-
     fn open_selected(&mut self) {
         let node = self.tree.node(self.tree.selected());
 
@@ -442,17 +412,6 @@ impl App {
         }
 
         self.pending_open = Some(node.path.clone());
-    }
-
-    /// The folder the focused row belongs to: itself if it is one, otherwise its parent.
-    fn focused_folder(&self) -> Option<NodeId> {
-        let id = self.tree.selected();
-        let node = self.tree.node(id);
-
-        match node.kind.is_dir() {
-            true => Some(id),
-            false => node.parent,
-        }
     }
 
     fn expand_all(&mut self) {
@@ -502,6 +461,17 @@ impl App {
         self.tree.select(id);
     }
 
+    /// The folder the focused row belongs to: itself if it is one, otherwise its parent.
+    fn focused_folder(&self) -> Option<NodeId> {
+        let id = self.tree.selected();
+        let node = self.tree.node(id);
+
+        match node.kind.is_dir() {
+            true => Some(id),
+            false => node.parent,
+        }
+    }
+
     fn yank(&mut self, kind: YankKind) {
         let path = self.tree.node(self.tree.selected()).path.clone();
         let text = match kind {
@@ -519,6 +489,170 @@ impl App {
         }
     }
 
+    fn toggle(&mut self, toggle: Toggle) {
+        if toggle.needs_git() && !self.git.is_repo() {
+            self.message = Some("not a git repository".to_owned());
+            return;
+        }
+
+        match toggle {
+            Toggle::Hidden => self.toggles.show_hidden = !self.toggles.show_hidden,
+            Toggle::Gitignored => self.toggles.show_gitignored = !self.toggles.show_gitignored,
+            Toggle::ChangedOnly => self.toggles.changed_only = !self.toggles.changed_only,
+        }
+
+        self.apply_filter();
+    }
+
+    fn apply_filter(&mut self) {
+        self.tree.set_filter(Filter {
+            show_hidden: self.toggles.show_hidden,
+            show_gitignored: self.toggles.show_gitignored,
+            changed_only: self.toggles.changed_only,
+        });
+
+        // The results were matched against the old filters, so they are worked out again.
+        if self.tree.is_searching() {
+            self.refresh_matches();
+        }
+
+        if self.toggles.changed_only {
+            self.load_changed_directories();
+        }
+    }
+
+    /// `changed_only` can reveal folders that were never expanded, so their contents are loaded
+    /// on demand rather than being left as empty rows.
+    fn load_changed_directories(&mut self) {
+        let pending: Vec<PathBuf> = self
+            .tree
+            .iter()
+            .filter(|(_, node)| node.changed && node.kind.is_dir() && !node.is_loaded())
+            .map(|(_, node)| node.path.clone())
+            .collect();
+
+        for path in pending {
+            self.scanner.request(path, self.config.sort_order);
+        }
+    }
+
+    /// Re-reads every loaded directory and the git status. The watcher normally keeps both up to
+    /// date; this is the manual path for `watch = false` and for anything the watcher missed.
+    fn refresh(&mut self) {
+        let loaded: Vec<PathBuf> = self
+            .tree
+            .iter()
+            .filter(|(_, node)| node.kind.is_dir() && node.is_loaded())
+            .map(|(_, node)| node.path.clone())
+            .collect();
+
+        for path in loaded {
+            self.scanner.request(path, self.config.sort_order);
+        }
+
+        self.refresh_git();
+    }
+
+    fn open_command_bar(&mut self) {
+        self.command_line.open();
+        self.mode = Mode::Command;
+    }
+
+    fn open_search(&mut self) {
+        self.search.clear();
+        self.search_return = Some(self.tree.selected());
+        self.mode = Mode::Search;
+
+        self.tree.rewind_unloaded();
+        self.requery();
+    }
+
+    /// A new query is a different set of results, so the cursor goes to the best of them.
+    fn requery(&mut self) {
+        self.refresh_matches();
+
+        self.tree.refresh_rows();
+        self.tree.select_best_match();
+    }
+
+    /// Re-filters without moving the cursor, for entries that turn up while the query stands.
+    fn refresh_matches(&mut self) {
+        let matches = self.search.matches(&self.tree, &self.root);
+        self.tree.set_search(matches);
+    }
+
+    /// A search can only find what the arena holds, so it reads the folders that were never
+    /// opened. The scanner threads do the reading and results grow as they arrive.
+    fn load_unread_folders(&mut self) {
+        if self.tree.node_count() > SEARCH_LOAD_LIMIT {
+            self.message = Some(format!("searching the first {SEARCH_LOAD_LIMIT} entries"));
+            return;
+        }
+
+        for id in self.tree.unloaded_directories() {
+            self.request(id);
+        }
+    }
+
+    /// Taking a result ends the search on the spot: the tree comes back whole with the cursor
+    /// on that entry. A query that found nothing has nothing to take, so it just goes back.
+    fn select_match(&mut self) {
+        if self.tree.match_count() == 0 {
+            self.cancel_search();
+            return;
+        }
+
+        let selected = self.tree.selected();
+
+        self.leave_search();
+        self.reveal(selected);
+    }
+
+    fn cancel_search(&mut self) {
+        let restore = self.search_return;
+
+        self.leave_search();
+
+        if let Some(id) = restore {
+            self.tree.select(id);
+        }
+    }
+
+    fn leave_search(&mut self) {
+        self.mode = Mode::Normal;
+        self.search_return = None;
+        self.search.clear();
+        self.tree.set_search(None);
+    }
+
+    /// Opens every folder above a node and puts the cursor on it, in the middle of the screen.
+    fn reveal(&mut self, id: NodeId) {
+        let mut current = self.tree.node(id).parent;
+
+        while let Some(parent) = current {
+            self.expand(parent);
+            current = self.tree.node(parent).parent;
+        }
+
+        self.tree.select(id);
+        self.tree.refresh_rows();
+        self.center_cursor();
+    }
+
+    /// Backs out of whatever is on top of the tree.
+    fn dismiss(&mut self) {
+        match self.mode {
+            Mode::Search => self.cancel_search(),
+            Mode::Command | Mode::Help => self.mode = Mode::Normal,
+            Mode::Normal => {}
+        }
+    }
+
+    fn show_help(&mut self) {
+        self.help_scroll = 0;
+        self.mode = Mode::Help;
+    }
+
     fn expand(&mut self, id: NodeId) {
         self.tree.set_expanded(id, true);
 
@@ -526,6 +660,11 @@ impl App {
             true => self.prefetch(id),
             false => self.request(id),
         }
+    }
+
+    fn collapse(&mut self, id: NodeId) {
+        self.expanding.clear();
+        self.tree.set_expanded(id, false);
     }
 
     fn request(&mut self, id: NodeId) {
@@ -587,38 +726,78 @@ impl App {
         if self.is_expanding(&path) {
             self.expand_subtree(id);
         }
-    }
 
-    fn move_cursor_by(&mut self, delta: isize) {
-        let row = self.tree.selected_row().saturating_add_signed(delta);
-        self.tree
-            .select_row(row.min(self.tree.rows().len().saturating_sub(1)));
-    }
-
-    fn center_cursor(&mut self) {
-        self.scroll = self
-            .tree
-            .selected_row()
-            .saturating_sub(self.viewport_height / 2);
-    }
-
-    /// Keeps the cursor inside the viewport with `scrolloff` lines of context where possible.
-    fn clamp_scroll(&mut self) {
-        let rows = self.tree.rows().len();
-        let cursor = self.tree.selected_row();
-        let scrolloff = self
-            .config
-            .scrolloff
-            .min(self.viewport_height.saturating_sub(1) / 2);
-
-        if cursor < self.scroll + scrolloff {
-            self.scroll = cursor.saturating_sub(scrolloff);
+        // Re-ranking on every arriving folder would be quadratic, so the results catch up
+        // whenever the scanner runs dry, and on the next keystroke regardless.
+        if self.mode == Mode::Search && self.scanner.is_idle() {
+            self.refresh_matches();
         }
-        if cursor + scrolloff >= self.scroll + self.viewport_height {
-            self.scroll = cursor + scrolloff + 1 - self.viewport_height;
+    }
+
+    /// Re-reads the directories that changed on disk, and the git status when `.git` was touched.
+    fn fs_change(&mut self, paths: Vec<PathBuf>) {
+        let mut directories: HashSet<PathBuf> = HashSet::new();
+        let mut git_touched = false;
+
+        for path in paths {
+            if is_inside_git_dir(&path) {
+                git_touched = true;
+                continue;
+            }
+
+            let parents = [path.parent(), Some(path.as_path())];
+            for parent in parents.into_iter().flatten() {
+                if self
+                    .tree
+                    .find(parent)
+                    .is_some_and(|id| self.tree.node(id).is_loaded())
+                {
+                    directories.insert(parent.to_path_buf());
+                }
+            }
         }
 
-        self.scroll = self.scroll.min(rows.saturating_sub(self.viewport_height));
+        for path in directories {
+            self.scanner.request(path, self.config.sort_order);
+        }
+
+        if git_touched {
+            self.refresh_git();
+        }
+    }
+
+    fn refresh_git(&mut self) {
+        self.git_pending = true;
+        git::spawn(self.root.clone(), self.events.sender());
+    }
+
+    fn git_done(&mut self, result: Result<GitInfo>) {
+        self.git_pending = false;
+
+        match result {
+            Ok(info) => self.git = info,
+            Err(err) => self.message = Some(format!("git: {err:#}")),
+        }
+
+        // A restored `changed_only` would hide everything outside a repository.
+        if !self.git.is_repo() {
+            self.toggles.changed_only = false;
+        }
+
+        self.mark_all_changed();
+        self.apply_filter();
+    }
+
+    fn mark_changed(&mut self) {
+        let Self { tree, git, .. } = self;
+
+        tree.mark_changed(&mut |path| git.has_changes(path));
+    }
+
+    fn mark_all_changed(&mut self) {
+        let Self { tree, git, .. } = self;
+
+        tree.mark_all_changed(&mut |path| git.has_changes(path));
     }
 
     pub fn is_selected(&self, row: usize) -> bool {
@@ -637,6 +816,15 @@ impl Toggle {
     fn needs_git(self) -> bool {
         matches!(self, Toggle::Gitignored | Toggle::ChangedOnly)
     }
+}
+
+/// The commands that still act while a prompt or an overlay is up: they walk whatever list it
+/// put there and take what the cursor lands on. The rest drive the tree, which is out of reach.
+fn acts_on_top(command: &Command) -> bool {
+    matches!(
+        command,
+        Command::MoveDown | Command::MoveUp | Command::Select | Command::Dismiss
+    )
 }
 
 fn is_inside_git_dir(path: &Path) -> bool {

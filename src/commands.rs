@@ -3,6 +3,7 @@ use nucleo_matcher::{Config, Matcher, Utf32Str};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Command {
+    // moving the cursor
     MoveDown,
     MoveUp,
     MoveNextSibling,
@@ -15,16 +16,22 @@ pub enum Command {
     HalfPageDown,
     HalfPageUp,
     CenterCursor,
+    // acting on the entry under it
     Select,
+    Open,
     ExpandAll,
     CollapseAll,
-    Open,
     YankPath,
     YankRelativePath,
+    // what the tree shows
     ToggleHidden,
     ToggleGitignored,
     ToggleChangedOnly,
     Refresh,
+    // prompts and overlays
+    OpenCommandBar,
+    Search,
+    Dismiss,
     Help,
     Quit,
 }
@@ -132,6 +139,12 @@ pub const REGISTRY: &[Entry] = &[
         "Expand or collapse a folder, or open a file in the editor",
     ),
     entry(
+        Command::Open,
+        "open",
+        None,
+        "Open the focused file in the editor",
+    ),
+    entry(
         Command::ExpandAll,
         "expand_all",
         Some("ea"),
@@ -142,12 +155,6 @@ pub const REGISTRY: &[Entry] = &[
         "collapse_all",
         Some("ca"),
         "Collapse the focused folder and everything inside it",
-    ),
-    entry(
-        Command::Open,
-        "open",
-        None,
-        "Open the focused file in the editor",
     ),
     entry(
         Command::YankPath,
@@ -184,6 +191,24 @@ pub const REGISTRY: &[Entry] = &[
         "refresh",
         Some("r"),
         "Re-read the loaded folders and the git status",
+    ),
+    entry(
+        Command::OpenCommandBar,
+        "command",
+        None,
+        "Open the command bar",
+    ),
+    entry(
+        Command::Search,
+        "search",
+        None,
+        "Narrow the tree to the entries matching a query",
+    ),
+    entry(
+        Command::Dismiss,
+        "dismiss",
+        None,
+        "Close the help overlay, the command bar or a search",
     ),
     entry(Command::Help, "help", None, "Show the list of commands"),
     entry(Command::Quit, "quit", Some("q"), "Leave bettertree"),

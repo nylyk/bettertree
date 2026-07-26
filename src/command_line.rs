@@ -19,8 +19,6 @@ pub struct CommandLine {
     candidates: Vec<&'static Entry>,
     selected: usize,
     scroll: usize,
-    history: Vec<String>,
-    recalled: Option<usize>,
 }
 
 impl CommandLine {
@@ -30,14 +28,11 @@ impl CommandLine {
             candidates: commands::search(""),
             selected: 0,
             scroll: 0,
-            history: Vec::new(),
-            recalled: None,
         }
     }
 
     pub fn open(&mut self) {
         self.input.clear();
-        self.recalled = None;
         self.refresh();
     }
 
@@ -65,14 +60,10 @@ impl CommandLine {
             KeyCode::Esc => Outcome::Cancel,
             KeyCode::Enter => self.run(),
 
-            // The arrows scroll the completions, so history sits one modifier away.
-            KeyCode::Up if ctrl => self.recall(true),
-            KeyCode::Down if ctrl => self.recall(false),
-
-            KeyCode::Down | KeyCode::Tab => self.highlight(1),
-            KeyCode::Up | KeyCode::BackTab => self.highlight(-1),
-            KeyCode::Char('n') if ctrl => self.highlight(1),
-            KeyCode::Char('p') if ctrl => self.highlight(-1),
+            KeyCode::Down | KeyCode::Tab => self.highlighted(1),
+            KeyCode::Up | KeyCode::BackTab => self.highlighted(-1),
+            KeyCode::Char('n') if ctrl => self.highlighted(1),
+            KeyCode::Char('p') if ctrl => self.highlighted(-1),
 
             KeyCode::Char('u') if ctrl => self.edit(|input| input.clear()),
             KeyCode::Char('w') if ctrl => self.edit(delete_word),
@@ -90,7 +81,6 @@ impl CommandLine {
 
     fn edit(&mut self, change: impl FnOnce(&mut String)) -> Outcome {
         change(&mut self.input);
-        self.recalled = None;
         self.refresh();
 
         Outcome::Continue
@@ -102,17 +92,22 @@ impl CommandLine {
         self.scroll = 0;
     }
 
-    fn highlight(&mut self, delta: isize) -> Outcome {
+    fn highlighted(&mut self, delta: isize) -> Outcome {
+        self.highlight(delta);
+
+        Outcome::Continue
+    }
+
+    /// Moves the highlight, which `move_up` and `move_down` do while the bar is open.
+    pub fn highlight(&mut self, delta: isize) {
         if self.candidates.is_empty() {
-            return Outcome::Continue;
+            return;
         }
 
         let count = self.candidates.len() as isize;
         let next = (self.selected as isize + delta).rem_euclid(count);
         self.selected = next as usize;
         self.follow_selection();
-
-        Outcome::Continue
     }
 
     /// Moves the window the least amount needed to keep the highlighted entry on screen, so
@@ -126,29 +121,8 @@ impl CommandLine {
         }
     }
 
-    /// History is oldest-first, so walking to an older entry counts down through the indices.
-    fn recall(&mut self, older: bool) -> Outcome {
-        if self.history.is_empty() {
-            return Outcome::Continue;
-        }
-
-        let last = self.history.len() - 1;
-        let index = match (self.recalled, older) {
-            (None, true) => Some(last),
-            (None, false) => None,
-            (Some(current), true) => Some(current.saturating_sub(1)),
-            (Some(current), false) if current == last => None,
-            (Some(current), false) => Some(current + 1),
-        };
-
-        self.recalled = index;
-        self.input = index.map_or_else(String::new, |index| self.history[index].clone());
-        self.refresh();
-
-        Outcome::Continue
-    }
-
-    fn run(&mut self) -> Outcome {
+    /// Runs the highlighted candidate, which is what `select` means while the bar is open.
+    pub fn run(&mut self) -> Outcome {
         if self.input.is_empty() {
             return Outcome::Cancel;
         }
@@ -157,14 +131,7 @@ impl CommandLine {
             return Outcome::Error(format!("unknown command: {}", self.input));
         };
 
-        self.remember(entry.name.to_owned());
-
         Outcome::Run(entry.command)
-    }
-
-    fn remember(&mut self, name: String) {
-        self.history.retain(|previous| *previous != name);
-        self.history.push(name);
     }
 }
 
@@ -183,10 +150,6 @@ mod tests {
 
     fn press(line: &mut CommandLine, key: KeyCode) -> Outcome {
         line.handle_key(KeyEvent::from(key))
-    }
-
-    fn press_ctrl(line: &mut CommandLine, key: KeyCode) -> Outcome {
-        line.handle_key(KeyEvent::new(key, KeyModifiers::CONTROL))
     }
 
     fn type_text(line: &mut CommandLine, text: &str) {
@@ -272,30 +235,6 @@ mod tests {
             press(&mut line, KeyCode::Backspace),
             Outcome::Cancel
         ));
-    }
-
-    #[test]
-    fn history_recalls_the_last_command_first() {
-        let mut line = CommandLine::new();
-
-        type_text(&mut line, "help");
-        press(&mut line, KeyCode::Enter);
-        line.open();
-        type_text(&mut line, "quit");
-        press(&mut line, KeyCode::Enter);
-        line.open();
-
-        press_ctrl(&mut line, KeyCode::Up);
-        assert_eq!(line.input(), "quit");
-
-        press_ctrl(&mut line, KeyCode::Up);
-        assert_eq!(line.input(), "help");
-
-        press_ctrl(&mut line, KeyCode::Down);
-        assert_eq!(line.input(), "quit");
-
-        press_ctrl(&mut line, KeyCode::Down);
-        assert_eq!(line.input(), "");
     }
 
     #[test]

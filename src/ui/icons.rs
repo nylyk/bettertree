@@ -39,7 +39,6 @@ fn by_name(name: &str) -> &'static str {
         "dockerfile" | "compose.yaml" | "docker-compose.yml" => "󰡨 ",
         "makefile" | "justfile" => " ",
         "license" | "license.md" | "licence" => " ",
-        "readme" | "readme.md" => "󰂺 ",
         ".gitignore" | ".gitattributes" | ".gitmodules" => " ",
         _ => "",
     };

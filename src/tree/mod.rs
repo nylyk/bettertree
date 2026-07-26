@@ -1,14 +1,14 @@
 pub mod scan;
 pub mod watch;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use scan::Entry;
 
 pub const ROOT: NodeId = NodeId(0);
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct NodeId(usize);
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -58,6 +58,14 @@ pub struct Row {
     pub depth: usize,
 }
 
+/// A running search, as the tree sees it: the entries that matched, the folders above them, and
+/// which of the results the query fits best.
+struct SearchFilter {
+    matched: HashSet<NodeId>,
+    path: HashSet<NodeId>,
+    best: Option<NodeId>,
+}
+
 /// Nodes are added but never removed, so a collapsed folder keeps the expansion state of
 /// everything inside it and re-expanding restores the exact previous shape.
 pub struct Tree {
@@ -66,9 +74,11 @@ pub struct Tree {
     rows: Vec<Row>,
     rows_dirty: bool,
     filter: Filter,
+    search: Option<SearchFilter>,
     /// Nodes below these marks have already been classified; everything above is new.
     ignore_mark: usize,
     changed_mark: usize,
+    load_mark: usize,
     selected: NodeId,
     selected_row: usize,
 }
@@ -99,8 +109,10 @@ impl Tree {
             rows: Vec::new(),
             rows_dirty: true,
             filter: Filter::default(),
+            search: None,
             ignore_mark: 1,
             changed_mark: 0,
+            load_mark: 0,
             selected: ROOT,
             selected_row: 0,
         }
@@ -248,6 +260,133 @@ impl Tree {
         self.rows_dirty = true;
     }
 
+    /// Narrows the tree to a set of results, best first, and the folders leading to them, or
+    /// clears the search when given `None`.
+    pub fn set_search(&mut self, ranked: Option<Vec<NodeId>>) {
+        self.search = ranked.map(|ranked| SearchFilter {
+            path: self.ancestors_of(&ranked),
+            best: ranked.first().copied(),
+            matched: ranked.into_iter().collect(),
+        });
+
+        self.rows_dirty = true;
+    }
+
+    /// The folders above the results. They are what the search opens, and walking up stops at
+    /// the first one already recorded, so the whole set costs one pass over the results.
+    fn ancestors_of(&self, matched: &[NodeId]) -> HashSet<NodeId> {
+        let mut path = HashSet::new();
+
+        for id in matched {
+            let mut current = self.nodes[id.0].parent;
+
+            while let Some(parent) = current {
+                if !path.insert(parent) {
+                    break;
+                }
+                current = self.nodes[parent.0].parent;
+            }
+        }
+
+        path
+    }
+
+    pub fn is_searching(&self) -> bool {
+        self.search.is_some()
+    }
+
+    pub fn match_count(&self) -> usize {
+        self.search
+            .as_ref()
+            .map_or(0, |search| search.matched.len())
+    }
+
+    /// Steps between search results, passing over the folders that only lead to one. Walking on
+    /// from the cursor and wrapping round is the same as visiting every row once, starting at
+    /// the neighbour, so the ends need no special case.
+    pub fn move_to_match(&mut self, delta: isize) {
+        let count = self.rows.len();
+        if count == 0 {
+            return;
+        }
+
+        let target = (1..=count)
+            .map(|step| match delta >= 0 {
+                true => (self.selected_row + step) % count,
+                false => (self.selected_row + count - step) % count,
+            })
+            .find(|row| self.is_match(*row));
+
+        if let Some(row) = target {
+            self.select_row(row);
+        }
+    }
+
+    /// Puts the cursor on the result the query fits best, which the tree may well draw below a
+    /// weaker one: the rows are in the tree's order, not the ranking's.
+    pub fn select_best_match(&mut self) {
+        if let Some(best) = self.search.as_ref().and_then(|search| search.best) {
+            self.select(best);
+        }
+    }
+
+    fn is_match(&self, row: usize) -> bool {
+        let Some(search) = &self.search else {
+            return false;
+        };
+
+        self.rows
+            .get(row)
+            .is_some_and(|row| search.matched.contains(&row.id))
+    }
+
+    /// Every entry the tree would show if all its folders were open: what a search looks through.
+    pub fn reachable(&self) -> impl Iterator<Item = (NodeId, &Node)> {
+        self.iter()
+            .filter(|(id, _)| *id != ROOT && self.is_reachable(*id))
+    }
+
+    /// Filters hide a folder without hiding what is inside it, so a search has to walk up. The
+    /// running search is left out on purpose: every query is matched against the whole tree.
+    fn is_reachable(&self, id: NodeId) -> bool {
+        let mut current = id;
+
+        while current != ROOT {
+            let node = &self.nodes[current.0];
+            if !node.alive || !self.passes_filters(node) {
+                return false;
+            }
+
+            let Some(parent) = node.parent else {
+                return false;
+            };
+            current = parent;
+        }
+
+        true
+    }
+
+    /// The directories that appeared since the last call and still have not been read. Search
+    /// walks the whole project this way, a batch per event, rather than re-scanning the arena.
+    pub fn unloaded_directories(&mut self) -> Vec<NodeId> {
+        let found = (self.load_mark..self.nodes.len())
+            .map(NodeId)
+            .filter(|id| {
+                let node = &self.nodes[id.0];
+                node.kind.is_dir() && !node.is_loaded() && self.is_reachable(*id)
+            })
+            .collect();
+
+        self.load_mark = self.nodes.len();
+
+        found
+    }
+
+    /// Starts the walk over, so entries a filter change has just revealed are read too.
+    pub fn rewind_unloaded(&mut self) {
+        self.load_mark = 0;
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = (NodeId, &Node)> {
         self.nodes
             .iter()
@@ -311,8 +450,7 @@ impl Tree {
         };
 
         for child in children {
-            let node = &self.nodes[child.0];
-            if !node.alive || !self.is_visible(node) {
+            if !self.is_visible(child) {
                 continue;
             }
 
@@ -325,7 +463,20 @@ impl Tree {
         }
     }
 
-    fn is_visible(&self, node: &Node) -> bool {
+    /// A running search narrows the tree further: only the results and the folders above them.
+    fn is_visible(&self, id: NodeId) -> bool {
+        let node = &self.nodes[id.0];
+        if !node.alive || !self.passes_filters(node) {
+            return false;
+        }
+
+        match &self.search {
+            Some(search) => search.matched.contains(&id) || search.path.contains(&id),
+            None => true,
+        }
+    }
+
+    fn passes_filters(&self, node: &Node) -> bool {
         if !self.filter.show_hidden && node.name.starts_with('.') {
             return false;
         }
@@ -339,12 +490,21 @@ impl Tree {
         true
     }
 
-    /// `changed_only` opens folders that contain changes without touching their saved expansion,
-    /// so turning the filter off restores the tree exactly as it was.
+    /// `changed_only` and a search both open folders without touching their saved expansion, so
+    /// turning either off restores the tree exactly as it was.
     pub fn is_open(&self, id: NodeId) -> bool {
         let node = &self.nodes[id.0];
+        if !node.kind.is_dir() {
+            return false;
+        }
 
-        node.expanded || (self.filter.changed_only && node.kind.is_dir() && node.changed)
+        // A search shows the results and the folders leading to them, and nothing else: a
+        // folder that only holds non-matching entries would otherwise open on an empty subtree.
+        if let Some(search) = &self.search {
+            return search.path.contains(&id);
+        }
+
+        node.expanded || (self.filter.changed_only && node.changed)
     }
 
     /// Keeps the cursor on the selected node, falling back to its nearest visible ancestor.
@@ -615,6 +775,100 @@ mod tests {
 
         tree.set_expanded(a, true);
         assert_eq!(visible(&mut tree), ["a", "b", "deep.rs", "a.rs", "z.rs"]);
+    }
+
+    #[test]
+    fn a_search_opens_the_way_to_its_results_without_altering_expansion() {
+        let mut tree = sample();
+        let a = find(&tree, "a");
+        let b = find(&tree, "b");
+        let deep = find(&tree, "deep.rs");
+        assert_eq!(visible(&mut tree), ["a", "z.rs"]);
+
+        tree.set_search(Some(vec![deep]));
+        assert_eq!(visible(&mut tree), ["a", "b", "deep.rs"]);
+        assert!(tree.is_open(a) && tree.is_open(b));
+        assert!(
+            !tree.node(a).expanded,
+            "the search must not persist expansion"
+        );
+
+        tree.set_search(None);
+        assert_eq!(visible(&mut tree), ["a", "z.rs"]);
+    }
+
+    #[test]
+    fn stepping_through_results_skips_the_folders_and_wraps() {
+        let mut tree = sample();
+        let deep = find(&tree, "deep.rs");
+        let z = find(&tree, "z.rs");
+
+        tree.set_search(Some(vec![deep, z]));
+        assert_eq!(visible(&mut tree), ["a", "b", "deep.rs", "z.rs"]);
+        tree.select_best_match();
+        assert_eq!(tree.selected(), deep);
+
+        tree.move_to_match(1);
+        assert_eq!(tree.selected(), z, "the folders in between are passed over");
+
+        tree.move_to_match(1);
+        assert_eq!(tree.selected(), deep, "the last result wraps to the first");
+
+        tree.move_to_match(-1);
+        assert_eq!(tree.selected(), z, "and the first back to the last");
+    }
+
+    #[test]
+    fn a_folder_that_is_itself_a_result_stays_shut() {
+        let mut tree = sample();
+        let b = find(&tree, "b");
+
+        tree.set_search(Some(vec![b]));
+
+        assert_eq!(visible(&mut tree), ["a", "b"]);
+        assert!(!tree.is_open(b), "nothing inside it matched");
+    }
+
+    #[test]
+    fn a_search_looks_through_what_the_filters_leave() {
+        let mut tree = Tree::new(PathBuf::from("/root"));
+        tree.graft(
+            ROOT,
+            vec![entry(".git", Kind::Dir), entry("a.rs", Kind::File)],
+        );
+        tree.graft(find(&tree, ".git"), vec![entry("config", Kind::File)]);
+
+        let names = |tree: &Tree| -> Vec<String> {
+            tree.reachable()
+                .map(|(_, node)| node.name.clone())
+                .collect()
+        };
+
+        assert_eq!(names(&tree), ["a.rs"], "a hidden folder hides its contents");
+
+        tree.set_filter(Filter {
+            show_hidden: true,
+            ..Filter::default()
+        });
+        assert_eq!(names(&tree), [".git", "a.rs", "config"]);
+    }
+
+    #[test]
+    fn unloaded_directories_are_reported_once_each() {
+        let mut tree = sample();
+        tree.graft(find(&tree, "a"), vec![entry("fresh", Kind::Dir)]);
+
+        let first: Vec<String> = tree
+            .unloaded_directories()
+            .into_iter()
+            .map(|id| tree.node(id).name.clone())
+            .collect();
+
+        assert_eq!(first, ["fresh"], "the loaded folders are already read");
+        assert!(tree.unloaded_directories().is_empty());
+
+        tree.rewind_unloaded();
+        assert_eq!(tree.unloaded_directories().len(), 1);
     }
 
     #[test]

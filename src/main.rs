@@ -6,6 +6,7 @@ mod config;
 mod editor;
 mod events;
 mod git;
+mod search;
 mod state;
 mod tree;
 mod ui;

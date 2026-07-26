@@ -40,24 +40,38 @@ ui_muted_fg = "gray"
 # up down left right home end pgup pgdn enter tab space backspace esc del insert
 # Write shifted characters directly, so `G` rather than `S-g`.
 [keys]
+
+# moving the cursor
 "up" = "move_up"
 "k" = "move_up"
+"C-p" = "move_up"
 "down" = "move_down"
 "j" = "move_down"
+"C-n" = "move_down"
 "C-up" = "move_prev_sibling"
 "C-k" = "move_prev_sibling"
 "C-down" = "move_next_sibling"
 "C-j" = "move_next_sibling"
 "left" = "move_parent"
 "h" = "move_parent"
-"enter" = "select"
 "pgup" = "jump_up"
 "pgdn" = "jump_down"
+
+# acting on the entry under it
+"enter" = "select"
+"o" = "open"
 "e" = "expand_all"
 "c" = "collapse_all"
+
+# what the tree shows
 "." = "toggle_hidden"
 "i" = "toggle_gitignored"
 "m" = "toggle_changed_only"
+
+# prompts and overlays
+":" = "command"
+"/" = "search"
+"esc" = "dismiss"
 "?" = "help"
 "q" = "quit"
 "C-c" = "quit"

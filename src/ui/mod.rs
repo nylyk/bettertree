@@ -1,6 +1,7 @@
 mod command_bar;
 mod help;
 mod icons;
+mod search_bar;
 mod status_bar;
 mod tree_view;
 
@@ -30,6 +31,13 @@ pub fn render(app: &App, frame: &mut Frame) {
             &app.config,
             frame,
             tree_area,
+            prompt_area,
+        ),
+        Mode::Search => search_bar::render(
+            &app.search,
+            app.tree.match_count(),
+            &app.config,
+            frame,
             prompt_area,
         ),
         Mode::Help => {

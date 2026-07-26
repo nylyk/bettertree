@@ -70,6 +70,10 @@ impl Scanner {
     pub fn finished(&mut self, path: &Path) {
         self.in_flight.remove(path);
     }
+
+    pub fn is_idle(&self) -> bool {
+        self.in_flight.is_empty()
+    }
 }
 
 fn worker_count() -> usize {
