@@ -44,6 +44,9 @@ Some essentials:
 | `/` | Search |
 | `q` | Quit |
 
+`:cd` reroots the tree at the focused folder and `:cd_up` at the folder above it, each with its
+own remembered shape. Neither touches the working directory of your shell.
+
 ## Configuration
 
 The first run writes a commented config to `~/.config/bettertree/config.toml` (or your

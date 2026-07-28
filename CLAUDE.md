@@ -37,7 +37,10 @@ decorations, and drive every action through a `:command` bar with fuzzy completi
   saved `expanded` flags, so leaving them restores the tree exactly. A search shows the results
   and the folders leading to them, and opens only the latter.
 - **Filters affect display only.** They never unload or skip loading nodes.
-- **State is per opened root.** Child directories opened separately get their own state file.
+- **State is per opened root.** Child directories opened separately get their own state file, and
+  `:cd` is exactly that: save the root being left, build a fresh arena, load the new root's state.
+  Work in flight for the old root must be dropped, not applied, which is why a git snapshot comes
+  back with the root it describes.
 - **Never re-walk the whole arena per event.** Gitignore verdicts and change marks advance from a
   watermark; only a new git snapshot re-marks everything. Loading a large tree must stay linear.
 - **The watcher must ignore `EventKind::Access`.** inotify reports opens, and bettertree reads the

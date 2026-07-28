@@ -49,6 +49,17 @@ impl Watcher {
 
         let _ = watcher.unwatch(path);
     }
+
+    /// Drops every watch, for a tree that is being replaced wholesale.
+    pub fn unwatch_all(&mut self) {
+        let Some(watcher) = &mut self.watcher else {
+            return;
+        };
+
+        for path in self.watched.drain() {
+            let _ = watcher.unwatch(&path);
+        }
+    }
 }
 
 fn start(events: Sender<Event>) -> Option<RecommendedWatcher> {

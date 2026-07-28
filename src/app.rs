@@ -99,14 +99,7 @@ impl App {
     }
 
     pub fn run(&mut self, terminal: &mut DefaultTerminal) -> Result<()> {
-        if let Some(git_dir) = git::git_dir(&self.root) {
-            self.watcher.watch(&git_dir);
-        }
-
-        self.restore();
-        self.request(ROOT);
-        self.apply_filter();
-        self.refresh_git();
+        self.load_root();
 
         while !self.quit {
             if self.tree.needs_ignore_classification() {
@@ -127,7 +120,7 @@ impl App {
                 Event::Input(TerminalEvent::Key(key)) => self.handle_key(key),
                 Event::Input(_) => {}
                 Event::ScanDone { path, entries } => self.scan_done(path, entries),
-                Event::GitDone(result) => self.git_done(*result),
+                Event::GitDone { root, info } => self.git_done(&root, *info),
                 Event::FsChange(paths) => self.fs_change(paths),
             }
 
@@ -148,6 +141,18 @@ impl App {
         self.save();
 
         Ok(())
+    }
+
+    /// Brings up the tree of `self.root`: its saved state, its contents, and its git status.
+    fn load_root(&mut self) {
+        if let Some(git_dir) = git::git_dir(&self.root) {
+            self.watcher.watch(&git_dir);
+        }
+
+        self.restore();
+        self.request(ROOT);
+        self.apply_filter();
+        self.refresh_git();
     }
 
     /// Picks up where the last session in this directory left off.
@@ -310,6 +315,8 @@ impl App {
 
             Command::Select => self.select(),
             Command::Open => self.open_selected(),
+            Command::Cd => self.cd(),
+            Command::CdUp => self.cd_up(),
             Command::ExpandAll => self.expand_all(),
             Command::CollapseAll => self.collapse_all(),
             Command::YankPath => self.yank(YankKind::Absolute),
@@ -432,6 +439,47 @@ impl App {
         if let Err(err) = opener::open(&path) {
             self.message = Some(format!("{err:#}"));
         }
+    }
+
+    fn cd(&mut self) {
+        let Some(id) = self.focused_folder() else {
+            return;
+        };
+        let path = self.tree.node(id).path.clone();
+
+        self.reroot(path);
+    }
+
+    fn cd_up(&mut self) {
+        let Some(parent) = self.root.parent().map(Path::to_path_buf) else {
+            self.message = Some("no folder above this one".to_owned());
+            return;
+        };
+
+        self.reroot(parent);
+    }
+
+    /// Starts over on another root: a fresh arena, its own gitignore and git status, and the state
+    /// saved for it. The root being left is saved first, so returning to it finds it as it was.
+    ///
+    /// Scans of the old tree may still be in flight. They land on paths this arena does not know
+    /// yet, or does not know at all, and `scan_done` drops those.
+    fn reroot(&mut self, root: PathBuf) {
+        self.save();
+        self.watcher.unwatch_all();
+
+        self.root = root;
+        self.tree = Tree::new(self.root.clone());
+        self.tree.set_max_children(self.config.max_children);
+        self.ignores = Ignores::open(&self.root);
+
+        self.mode = Mode::Normal;
+        self.search.clear();
+        self.search_return = None;
+        self.expansion = None;
+        self.scroll = 0;
+
+        self.load_root();
     }
 
     fn selected_file(&mut self) -> Option<PathBuf> {
@@ -863,7 +911,10 @@ impl App {
         git::spawn(self.root.clone(), self.events.sender());
     }
 
-    fn git_done(&mut self, result: Result<GitInfo>) {
+    fn git_done(&mut self, root: &Path, result: Result<GitInfo>) {
+        if root != self.root {
+            return;
+        }
         self.git_pending = false;
 
         match result {

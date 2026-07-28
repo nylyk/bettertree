@@ -19,6 +19,8 @@ pub enum Command {
     // acting on the entry under it
     Select,
     Open,
+    Cd,
+    CdUp,
     ExpandAll,
     CollapseAll,
     YankPath,
@@ -143,6 +145,18 @@ pub const REGISTRY: &[Entry] = &[
         "open",
         None,
         "Open the focused file in its default application",
+    ),
+    entry(
+        Command::Cd,
+        "cd",
+        None,
+        "Make the focused folder the root of the tree",
+    ),
+    entry(
+        Command::CdUp,
+        "cd_up",
+        None,
+        "Make the containing folder the root of the tree",
     ),
     entry(
         Command::ExpandAll,

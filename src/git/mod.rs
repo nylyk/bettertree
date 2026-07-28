@@ -23,7 +23,10 @@ pub fn git_dir(root: &Path) -> Option<PathBuf> {
 pub fn spawn(root: PathBuf, events: Sender<Event>) {
     thread::spawn(move || {
         let info = status::compute(&root);
-        let _ = events.send(Event::GitDone(Box::new(info)));
+        let _ = events.send(Event::GitDone {
+            root,
+            info: Box::new(info),
+        });
     });
 }
 

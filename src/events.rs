@@ -24,7 +24,12 @@ pub enum Event {
         path: PathBuf,
         entries: io::Result<Vec<Entry>>,
     },
-    GitDone(Box<Result<GitInfo>>),
+    /// The root the snapshot describes comes with it: after `:cd` a snapshot of the root just left
+    /// may still be on its way, and it must not be taken for the new one.
+    GitDone {
+        root: PathBuf,
+        info: Box<Result<GitInfo>>,
+    },
     FsChange(Vec<PathBuf>),
 }
 
