@@ -1,6 +1,6 @@
 [package]
 name = "bettertree"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2024"
 description = "An interactive terminal file tree driven like Helix"
 authors = ["nylyk"]
