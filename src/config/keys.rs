@@ -44,17 +44,18 @@ impl KeyBinding {
 
         let code = parse_code(rest).ok_or_else(|| format!("unknown key: {spec}"))?;
 
-        // `S-tab` is what terminals report as back-tab, and shift on a character is the character
-        // itself: `S-g` and `G` are the same binding, as they are in Helix.
+        // `S-tab` is what terminals report as back-tab. On a character key there is nothing for
+        // shift to add: the terminal folds it into the character itself, and only for the keys
+        // where it happens to be the uppercase one — `S-1` is `!` on one layout and `+` on
+        // another. So the character is what gets written, and `S-` on one is refused.
         let binding = match (code, modifiers.contains(KeyModifiers::SHIFT)) {
             (KeyCode::Tab, true) => Self {
                 code: KeyCode::BackTab,
                 modifiers: modifiers - KeyModifiers::SHIFT,
             },
-            (KeyCode::Char(char), true) => Self {
-                code: KeyCode::Char(char.to_ascii_uppercase()),
-                modifiers: modifiers - KeyModifiers::SHIFT,
-            },
+            (KeyCode::Char(_), true) => {
+                return Err(format!("write shifted characters directly, not as {spec}"));
+            }
             _ => Self { code, modifiers },
         };
 
@@ -242,19 +243,11 @@ mod tests {
     }
 
     #[test]
-    fn a_shifted_character_is_the_character_itself() {
-        let uppercase = KeyBinding::parse("G").expect("parses");
-
-        assert_eq!(KeyBinding::parse("S-g"), Ok(uppercase));
-        assert_eq!(KeyBinding::parse("S-G"), Ok(uppercase));
-    }
-
-    #[test]
-    fn a_shifted_character_keeps_its_other_modifiers() {
-        assert_eq!(
-            KeyBinding::parse("C-S-g"),
-            Ok(binding(KeyCode::Char('G'), KeyModifiers::CONTROL))
-        );
+    fn shift_on_a_character_is_rejected() {
+        assert!(KeyBinding::parse("S-g").is_err());
+        assert!(KeyBinding::parse("S-1").is_err());
+        assert!(KeyBinding::parse("S-space").is_err());
+        assert!(KeyBinding::parse("C-S-g").is_err());
     }
 
     #[test]

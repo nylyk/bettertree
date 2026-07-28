@@ -1,5 +1,5 @@
 # bettertree config
-# Run `bt`, press `?` for the list of commands, or type `:` to run one by name.
+# Run `bt`, press `?` for the list of commands, or type `:` to run one by name
 
 editor = ""                   # empty = $EDITOR, then $VISUAL, then "vi"
 jump_lines = 10               # entries moved by jump_down / jump_up
@@ -12,13 +12,13 @@ max_expand_all = 20000        # entries one expand_all opens before it gives up;
 indent = 2
 watch = true                  # watch the loaded tree for filesystem changes
 
-# Startup defaults, used only for projects that have no saved state yet.
+# Startup defaults, used only for projects that have no saved state yet
 [toggles]
 show_hidden = false
 show_gitignored = false
 changed_only = false
 
-# ANSI names, "#rrggbb" for an exact colour, or "reset" for the terminal's foreground/background.
+# ANSI names, "#rrggbb" for an exact colour, or "reset" for the terminal's foreground/background
 [colors]
 file = "reset"
 file_modified = "yellow"
@@ -36,8 +36,9 @@ ui_status_bar_fg = "white"
 ui_accent = "blue"
 ui_muted_fg = "gray"
 
-# Keys are `C-`, `S-` and `A-` prefixes plus a character or one of:
-# up down left right home end pgup pgdn enter tab space backspace esc del insert
+# Keys are `C-` and `A-` prefixes plus a character or one of:
+# up down left right home end pgup pgdn enter tab S-tab space backspace esc del insert
+# Write shifted characters directly, so `G` rather than `S-g`
 [keys]
 
 # moving the cursor
@@ -62,7 +63,7 @@ ui_muted_fg = "gray"
 "e" = "expand_all"
 "c" = "collapse_all"
 
-# whats shown in the tree
+# what's shown in the tree
 "." = "toggle_hidden"
 "i" = "toggle_gitignored"
 "m" = "toggle_changed_only"

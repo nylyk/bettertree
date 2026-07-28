@@ -479,6 +479,10 @@ impl App {
         self.expansion = None;
         self.scroll = 0;
 
+        self.pending_expand.clear();
+        self.pending_select = None;
+        self.git = GitInfo::none();
+
         self.load_root();
     }
 
@@ -832,6 +836,14 @@ impl App {
         self.scanner.finished(&path);
 
         let Some(id) = self.tree.find(&path) else {
+            // The directory went away before its scan landed. An `expand_all` waiting on it would
+            // otherwise never finish, and would resume if the path ever came back.
+            if let Some(expansion) = self.resumed_expansion(&path)
+                && !expansion.waiting.is_empty()
+            {
+                self.expansion = Some(expansion);
+            }
+
             return;
         };
 

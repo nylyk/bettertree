@@ -1,5 +1,7 @@
 use std::ffi::OsString;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 use anyhow::{Context, Result};
@@ -18,7 +20,7 @@ const LAUNCHER: (&str, &[&str]) = ("xdg-open", &[]);
 /// Hands the path to the desktop's default application.
 ///
 /// The child keeps running after bettertree exits and must never touch this terminal, so its
-/// streams go to null, it is detached from the terminal, and it is not waited for.
+/// streams go to null and it is detached from the terminal.
 pub fn open(path: &Path) -> Result<()> {
     let (program, args) = LAUNCHER;
 
@@ -32,9 +34,13 @@ pub fn open(path: &Path) -> Result<()> {
 
     detach(&mut command);
 
-    command
+    let mut child = command
         .spawn()
         .with_context(|| format!("failed to run {program}"))?;
+
+    // `setsid` detaches the child from the terminal, not from this process: it stays this
+    // process' child, and a zombie for the rest of the session unless someone waits for it.
+    std::thread::spawn(move || child.wait());
 
     Ok(())
 }
@@ -165,14 +171,14 @@ fn argv(exec: &str, path: &Path) -> Vec<OsString> {
     let mut argv = Vec::new();
     let mut takes_path = false;
 
-    for word in exec.split_whitespace() {
-        match word {
+    for word in split_exec(exec) {
+        match word.as_str() {
             "%f" | "%F" | "%u" | "%U" => {
                 argv.push(path.into());
                 takes_path = true;
             }
             _ if word.starts_with('%') => {}
-            _ => argv.push(word.trim_matches('"').into()),
+            _ => argv.push(word.into()),
         }
     }
 
@@ -181,6 +187,41 @@ fn argv(exec: &str, path: &Path) -> Vec<OsString> {
     }
 
     argv
+}
+
+/// Splits an `Exec` line into words the way the desktop entry spec has it: whitespace separates
+/// them, unless it stands inside double quotes, where a backslash escapes the next character.
+///
+/// The spec forbids field codes inside a quoted argument, so a quoted word is passed on as it is.
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn split_exec(exec: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut word = String::new();
+    let mut quoted = false;
+    let mut escaped = false;
+
+    for char in exec.chars() {
+        match char {
+            _ if escaped => {
+                word.push(char);
+                escaped = false;
+            }
+            '\\' if quoted => escaped = true,
+            '"' => quoted = !quoted,
+            _ if char.is_whitespace() && !quoted => {
+                if !word.is_empty() {
+                    words.push(std::mem::take(&mut word));
+                }
+            }
+            _ => word.push(char),
+        }
+    }
+
+    if !word.is_empty() {
+        words.push(word);
+    }
+
+    words
 }
 
 #[cfg(test)]
@@ -212,6 +253,13 @@ mod tests {
         let argv = argv("hx --config c.toml %F", Path::new("/tmp/a.rs"));
 
         assert_eq!(argv, ["hx", "--config", "c.toml", "/tmp/a.rs"]);
+    }
+
+    #[test]
+    fn a_quoted_argument_stays_one_word() {
+        let argv = argv(r#"sh -c "run it""#, Path::new("/tmp/a.rs"));
+
+        assert_eq!(argv, ["sh", "-c", "run it", "/tmp/a.rs"]);
     }
 
     #[test]
