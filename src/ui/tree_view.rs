@@ -14,6 +14,11 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
     let height = usize::from(area.height);
     let width = usize::from(area.width);
 
+    if app.tree.rows().is_empty() {
+        render_empty(app, frame, area);
+        return;
+    }
+
     let lines: Vec<Line> = app
         .tree
         .rows()
@@ -38,6 +43,17 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
         .collect();
 
     frame.render_widget(Paragraph::new(lines), area);
+}
+
+/// A filter can leave nothing to draw, and an empty view says nothing about why.
+fn render_empty(app: &App, frame: &mut Frame, area: Rect) {
+    frame.render_widget(
+        Paragraph::new(Span::styled(
+            " nothing to show",
+            Style::default().fg(app.config.colors.ui_muted_fg.0),
+        )),
+        area,
+    );
 }
 
 /// Stands in for the entries the display cap left out of a folder.
