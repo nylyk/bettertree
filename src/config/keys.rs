@@ -44,15 +44,17 @@ impl KeyBinding {
 
         let code = parse_code(rest).ok_or_else(|| format!("unknown key: {spec}"))?;
 
-        // `S-tab` is what terminals report as back-tab, and shift on a character is the character.
+        // `S-tab` is what terminals report as back-tab, and shift on a character is the character
+        // itself: `S-g` and `G` are the same binding, as they are in Helix.
         let binding = match (code, modifiers.contains(KeyModifiers::SHIFT)) {
             (KeyCode::Tab, true) => Self {
                 code: KeyCode::BackTab,
                 modifiers: modifiers - KeyModifiers::SHIFT,
             },
-            (KeyCode::Char(_), true) => {
-                return Err(format!("write shifted characters directly, not as {spec}"));
-            }
+            (KeyCode::Char(char), true) => Self {
+                code: KeyCode::Char(char.to_ascii_uppercase()),
+                modifiers: modifiers - KeyModifiers::SHIFT,
+            },
             _ => Self { code, modifiers },
         };
 
@@ -234,10 +236,25 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unknown_and_shifted_characters() {
+    fn rejects_unknown_keys() {
         assert!(KeyBinding::parse("pgdown").is_err());
         assert!(KeyBinding::parse("C-nope").is_err());
-        assert!(KeyBinding::parse("S-a").is_err());
+    }
+
+    #[test]
+    fn a_shifted_character_is_the_character_itself() {
+        let uppercase = KeyBinding::parse("G").expect("parses");
+
+        assert_eq!(KeyBinding::parse("S-g"), Ok(uppercase));
+        assert_eq!(KeyBinding::parse("S-G"), Ok(uppercase));
+    }
+
+    #[test]
+    fn a_shifted_character_keeps_its_other_modifiers() {
+        assert_eq!(
+            KeyBinding::parse("C-S-g"),
+            Ok(binding(KeyCode::Char('G'), KeyModifiers::CONTROL))
+        );
     }
 
     #[test]

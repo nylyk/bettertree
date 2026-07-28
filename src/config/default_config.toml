@@ -1,10 +1,9 @@
 # bettertree config
-#
 # Run `bt`, press `?` for the list of commands, or type `:` to run one by name.
 
 editor = ""                   # empty = $EDITOR, then $VISUAL, then "vi"
 jump_lines = 10               # entries moved by jump_down / jump_up
-scrolloff = 10                # keep this many lines of context above/below the cursor
+scrolloff = 5                 # keep this many lines of context above/below the cursor
 icons = "nerdfont"            # "nerdfont" = file-type glyphs, "unicode" = ▸/▾ only, "none" = +/-
 sort_order = "folders_first"  # "folders_first" | "mixed" | "files_first" | "type"
 show_diffstat = true          # per-file +n -m on tree rows
@@ -19,8 +18,7 @@ show_hidden = false
 show_gitignored = false
 changed_only = false
 
-# The defaults are ANSI names so they follow your terminal palette. Any of these also takes
-# "#rrggbb" for an exact colour, or "reset" for the terminal's own foreground/background.
+# ANSI names, "#rrggbb" for an exact colour, or "reset" for the terminal's foreground/background.
 [colors]
 file = "reset"
 file_modified = "yellow"
@@ -40,7 +38,6 @@ ui_muted_fg = "gray"
 
 # Keys are `C-`, `S-` and `A-` prefixes plus a character or one of:
 # up down left right home end pgup pgdn enter tab space backspace esc del insert
-# Write shifted characters directly, so `G` rather than `S-g`.
 [keys]
 
 # moving the cursor
@@ -59,13 +56,13 @@ ui_muted_fg = "gray"
 "pgup" = "jump_up"
 "pgdn" = "jump_down"
 
-# acting on the entry under it
+# acting on the entry under the cursor
 "enter" = "select"
 "o" = "open"
 "e" = "expand_all"
 "c" = "collapse_all"
 
-# what the tree shows
+# whats shown in the tree
 "." = "toggle_hidden"
 "i" = "toggle_gitignored"
 "m" = "toggle_changed_only"

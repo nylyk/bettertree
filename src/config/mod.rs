@@ -39,7 +39,7 @@ impl Default for Config {
         Self {
             editor: String::new(),
             jump_lines: 10,
-            scrolloff: 10,
+            scrolloff: 5,
             icons: Icons::default(),
             sort_order: SortOrder::default(),
             show_diffstat: true,
