@@ -8,7 +8,7 @@ use super::icons;
 use crate::app::App;
 use crate::config::Config;
 use crate::git::{DiffStat, GitInfo};
-use crate::tree::Node;
+use crate::tree::{Node, RowKind};
 
 pub fn render(app: &App, frame: &mut Frame, area: Rect) {
     let height = usize::from(area.height);
@@ -21,22 +21,33 @@ pub fn render(app: &App, frame: &mut Frame, area: Rect) {
         .enumerate()
         .skip(app.scroll)
         .take(height)
-        .map(|(index, row)| {
-            line(
-                app.tree.node(row.id),
+        .map(|(index, row)| match row.kind {
+            RowKind::Entry(id) => line(
+                app.tree.node(id),
                 Layout {
                     depth: row.depth,
-                    open: app.tree.is_open(row.id),
+                    open: app.tree.is_open(id),
                     selected: app.is_selected(index),
                     width,
                 },
                 &app.config,
                 &app.git,
-            )
+            ),
+            RowKind::More(cut) => more_line(cut, row.depth, &app.config),
         })
         .collect();
 
     frame.render_widget(Paragraph::new(lines), area);
+}
+
+/// Stands in for the entries the display cap left out of a folder.
+fn more_line(cut: usize, depth: usize, config: &Config) -> Line<'static> {
+    let indent = " ".repeat(depth * config.indent + 1);
+
+    Line::from(Span::styled(
+        format!("{indent}… {cut} more entries …"),
+        Style::default().fg(config.colors.ui_muted_fg.0),
+    ))
 }
 
 /// Where a row sits on screen, as opposed to what it contains.

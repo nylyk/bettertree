@@ -23,6 +23,10 @@ pub struct Config {
     pub icons: Icons,
     pub sort_order: SortOrder,
     pub show_diffstat: bool,
+    /// The most entries one folder shows before the rest are summarised by a single row.
+    pub max_children: usize,
+    /// The most entries one `expand_all` opens.
+    pub max_expand_all: usize,
     pub indent: usize,
     pub watch: bool,
     pub toggles: Toggles,
@@ -39,6 +43,8 @@ impl Default for Config {
             icons: Icons::default(),
             sort_order: SortOrder::default(),
             show_diffstat: true,
+            max_children: 1000,
+            max_expand_all: 20_000,
             indent: 2,
             watch: true,
             toggles: Toggles::default(),
@@ -128,6 +134,8 @@ mod tests {
         assert_eq!(shipped.scrolloff, fallback.scrolloff);
         assert_eq!(shipped.sort_order, fallback.sort_order);
         assert_eq!(shipped.show_diffstat, fallback.show_diffstat);
+        assert_eq!(shipped.max_children, fallback.max_children);
+        assert_eq!(shipped.max_expand_all, fallback.max_expand_all);
         assert_eq!(shipped.indent, fallback.indent);
         assert_eq!(shipped.watch, fallback.watch);
 

@@ -17,11 +17,8 @@ use crate::search::{self, Search};
 use crate::state::State;
 use crate::tree::scan::{Entry, Scanner};
 use crate::tree::watch::Watcher;
-use crate::tree::{Filter, NodeId, ROOT, Tree};
+use crate::tree::{Filter, NodeId, ROOT, Row, Tree};
 use crate::ui;
-
-/// A stray `:expand_all` on a huge tree stops here instead of locking up the UI.
-const EXPAND_ALL_LIMIT: usize = 20_000;
 
 /// Search reads the folders it has not seen yet, and stops reading once the project is this big.
 const SEARCH_LOAD_LIMIT: usize = 50_000;
@@ -50,7 +47,7 @@ pub struct App {
     pub git_pending: bool,
     pub toggles: Toggles,
     pending_expand: Vec<PathBuf>,
-    expanding: Vec<PathBuf>,
+    expansion: Option<Expansion>,
     pending_select: Option<PathBuf>,
     events: Events,
     scanner: Scanner,
@@ -68,8 +65,11 @@ impl App {
         let watcher = Watcher::new(config.watch, events.sender());
         let ignores = Ignores::open(&root);
 
+        let mut tree = Tree::new(root.clone());
+        tree.set_max_children(config.max_children);
+
         Self {
-            tree: Tree::new(root.clone()),
+            tree,
             toggles: config.toggles,
             root,
             config,
@@ -83,7 +83,7 @@ impl App {
             git: GitInfo::none(),
             git_pending: false,
             pending_expand: Vec::new(),
-            expanding: Vec::new(),
+            expansion: None,
             pending_select: None,
             ignores,
             watcher,
@@ -419,36 +419,78 @@ impl App {
             return;
         };
 
-        self.expanding.push(self.tree.node(id).path.clone());
-        self.expand_subtree(id);
+        // One at a time: a walk still waiting on directories is abandoned, budget and all.
+        self.expansion = None;
+        self.expand_subtree(id, Expansion::default());
     }
 
     /// Expands everything currently known below `id`. Directories that have not been read yet
     /// stop the walk; it resumes from them in `scan_done`, so the subtree opens as it loads.
-    fn expand_subtree(&mut self, id: NodeId) {
+    ///
+    /// The expansion is kept only while it still has a directory to wait for. Once it has none,
+    /// it is over: a later rescan of the subtree cannot restart the walk, and the budget it spent
+    /// cannot count against the next `expand_all`.
+    fn expand_subtree(&mut self, id: NodeId, mut expansion: Expansion) {
+        let limit = self.expand_limit();
         let mut stack = vec![id];
 
         while let Some(current) = stack.pop() {
-            if self.tree.node_count() > EXPAND_ALL_LIMIT {
-                self.expanding.clear();
-                self.message = Some(format!("stopped expanding at {EXPAND_ALL_LIMIT} entries"));
+            if expansion.entries > limit {
+                self.message = Some(format!("stopped expanding at {limit} entries"));
                 return;
             }
 
+            let node = self.tree.node(current);
+            let unread = !node.is_loaded();
+            let path = node.path.clone();
+
             self.expand(current);
 
-            let children = self.tree.node(current).children.clone().unwrap_or_default();
-            let subdirectories = children
+            // The walk cannot see past a directory it has not read, so it stops and waits.
+            if unread {
+                expansion.waiting.insert(path);
+                continue;
+            }
+
+            // Only what the folder shows: entries the display cap or a filter left out are not
+            // opened, and do not spend the budget either.
+            let shown = self.tree.shown_children(current);
+            expansion.entries += shown.len();
+
+            let subdirectories = shown
                 .into_iter()
                 .filter(|child| self.tree.node(*child).kind.is_dir());
 
             stack.extend(subdirectories);
         }
+
+        if !expansion.waiting.is_empty() {
+            self.expansion = Some(expansion);
+        }
     }
 
-    /// True while `expand_all` is still opening a subtree that contains this path.
-    fn is_expanding(&self, path: &Path) -> bool {
-        self.expanding.iter().any(|root| path.starts_with(root))
+    /// How many entries one `expand_all` may open. The per-folder cap bounds how wide a folder
+    /// gets, not how many folders a subtree holds, so this is what keeps `expand_all` on a tree
+    /// full of directories from filling the row list. `0` in the config turns it off.
+    fn expand_limit(&self) -> usize {
+        match self.config.max_expand_all {
+            0 => usize::MAX,
+            limit => limit,
+        }
+    }
+
+    /// Takes the running `expand_all` when it was waiting on this directory, so a scan of any
+    /// other path — a manual `:refresh`, or the watcher — cannot restart a finished walk.
+    fn resumed_expansion(&mut self, path: &Path) -> Option<Expansion> {
+        let mut expansion = self.expansion.take()?;
+
+        if expansion.waiting.remove(path) {
+            return Some(expansion);
+        }
+
+        self.expansion = Some(expansion);
+
+        None
     }
 
     fn collapse_all(&mut self) {
@@ -456,7 +498,7 @@ impl App {
             return;
         };
 
-        self.expanding.clear();
+        self.expansion = None;
         self.tree.collapse_subtree(id);
         self.tree.select(id);
     }
@@ -518,6 +560,28 @@ impl App {
 
         if self.toggles.changed_only {
             self.load_changed_directories();
+        }
+
+        self.prefetch_shown();
+    }
+
+    /// A filter change puts a different set of entries on screen, so the look-ahead catches up:
+    /// folders it passed over while they were hidden can be opened now.
+    fn prefetch_shown(&mut self) {
+        self.tree.refresh_rows();
+
+        let open: Vec<NodeId> = self
+            .tree
+            .rows()
+            .iter()
+            .filter_map(Row::entry)
+            .filter(|id| self.tree.is_open(*id))
+            .collect();
+
+        self.prefetch(ROOT);
+
+        for id in open {
+            self.prefetch(id);
         }
     }
 
@@ -663,7 +727,7 @@ impl App {
     }
 
     fn collapse(&mut self, id: NodeId) {
-        self.expanding.clear();
+        self.expansion = None;
         self.tree.set_expanded(id, false);
     }
 
@@ -673,13 +737,10 @@ impl App {
     }
 
     /// Loads the direct children of every subdirectory so the next expand is instant. Only
-    /// expanded directories prefetch, which is what keeps this from walking the whole tree.
+    /// expanded directories prefetch, which is what keeps this from walking the whole tree, and
+    /// only the subdirectories on screen: what the display cap left out cannot be opened.
     fn prefetch(&mut self, id: NodeId) {
-        let Some(children) = self.tree.node(id).children.clone() else {
-            return;
-        };
-
-        for child in children {
+        for child in self.tree.shown_children(id) {
             let node = self.tree.node(child);
             if node.kind.is_dir() && !node.is_loaded() {
                 let path = node.path.clone();
@@ -723,8 +784,8 @@ impl App {
         self.mark_changed();
         self.apply_restored();
 
-        if self.is_expanding(&path) {
-            self.expand_subtree(id);
+        if let Some(expansion) = self.resumed_expansion(&path) {
+            self.expand_subtree(id, expansion);
         }
 
         // Re-ranking on every arriving folder would be quadratic, so the results catch up
@@ -803,6 +864,15 @@ impl App {
     pub fn is_selected(&self, row: usize) -> bool {
         row == self.tree.selected_row()
     }
+}
+
+/// A running `expand_all`: the directories it is still waiting to be read, and how many entries
+/// it has taken in. The walk pauses at every unread directory and resumes as each one arrives, so
+/// both have to survive those pauses; neither may outlive the walk itself.
+#[derive(Default)]
+struct Expansion {
+    waiting: HashSet<PathBuf>,
+    entries: usize,
 }
 
 #[derive(Clone, Copy)]

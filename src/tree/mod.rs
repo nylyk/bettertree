@@ -54,8 +54,24 @@ impl Node {
 }
 
 pub struct Row {
-    pub id: NodeId,
     pub depth: usize,
+    pub kind: RowKind,
+}
+
+/// A row is either an entry or the marker standing in for the entries a folder's display cap
+/// left out. The marker is not selectable; the cursor steps over it.
+pub enum RowKind {
+    Entry(NodeId),
+    More(usize),
+}
+
+impl Row {
+    pub fn entry(&self) -> Option<NodeId> {
+        match self.kind {
+            RowKind::Entry(id) => Some(id),
+            RowKind::More(_) => None,
+        }
+    }
 }
 
 /// A running search, as the tree sees it: the entries that matched, the folders above them, and
@@ -74,6 +90,8 @@ pub struct Tree {
     rows: Vec<Row>,
     rows_dirty: bool,
     filter: Filter,
+    /// The most entries one folder puts on screen. Display only: the rest stay loaded.
+    max_children: usize,
     search: Option<SearchFilter>,
     /// Nodes below these marks have already been classified; everything above is new.
     ignore_mark: usize,
@@ -109,6 +127,7 @@ impl Tree {
             rows: Vec::new(),
             rows_dirty: true,
             filter: Filter::default(),
+            max_children: usize::MAX,
             search: None,
             ignore_mark: 1,
             changed_mark: 0,
@@ -260,6 +279,64 @@ impl Tree {
         self.rows_dirty = true;
     }
 
+    /// Caps how many entries one folder shows, `0` meaning no cap. What the cap leaves out stays
+    /// loaded and searchable; it is summarised by a single marker row, which is what keeps a
+    /// folder of a million entries from putting a million rows on screen.
+    pub fn set_max_children(&mut self, max: usize) {
+        self.max_children = match max {
+            0 => usize::MAX,
+            max => max,
+        };
+
+        self.rows_dirty = true;
+    }
+
+    /// The children a folder puts on screen, and how many the cap left out.
+    fn visible_children(&self, id: NodeId) -> (Vec<NodeId>, usize) {
+        let Some(children) = &self.nodes[id.0].children else {
+            return (Vec::new(), 0);
+        };
+
+        let selected = self.selected_branch(id);
+        let mut shown = Vec::new();
+        let mut cut = 0;
+
+        for child in children.iter().copied() {
+            if !self.is_visible(child) {
+                continue;
+            }
+
+            match shown.len() < self.max_children || Some(child) == selected {
+                true => shown.push(child),
+                false => cut += 1,
+            }
+        }
+
+        (shown, cut)
+    }
+
+    /// Which child of `id`, if any, the cursor sits under. The cap is display only, so it never
+    /// takes the selected entry off screen: the branch leading to it is shown past the cap, just
+    /// above the marker, and everything remains reachable.
+    fn selected_branch(&self, id: NodeId) -> Option<NodeId> {
+        let mut current = self.selected;
+
+        while let Some(parent) = self.nodes[current.0].parent {
+            if parent == id {
+                return Some(current);
+            }
+            current = parent;
+        }
+
+        None
+    }
+
+    /// What a folder shows. Nothing past the cap can be selected or opened, so this is also
+    /// exactly the set worth reading ahead into.
+    pub fn shown_children(&self, id: NodeId) -> Vec<NodeId> {
+        self.visible_children(id).0
+    }
+
     /// Narrows the tree to a set of results, best first, and the folders leading to them, or
     /// clears the search when given `None`.
     pub fn set_search(&mut self, ranked: Option<Vec<NodeId>>) {
@@ -295,10 +372,18 @@ impl Tree {
         self.search.is_some()
     }
 
+    /// The results on screen. A folder's display cap can leave some of them out, and what it
+    /// leaves out cannot be stepped to, so this counts rows rather than the ranking.
     pub fn match_count(&self) -> usize {
-        self.search
-            .as_ref()
-            .map_or(0, |search| search.matched.len())
+        let Some(search) = &self.search else {
+            return 0;
+        };
+
+        self.rows
+            .iter()
+            .filter_map(Row::entry)
+            .filter(|id| search.matched.contains(id))
+            .count()
     }
 
     /// Steps between search results, passing over the folders that only lead to one. Walking on
@@ -337,7 +422,8 @@ impl Tree {
 
         self.rows
             .get(row)
-            .is_some_and(|row| search.matched.contains(&row.id))
+            .and_then(Row::entry)
+            .is_some_and(|id| search.matched.contains(&id))
     }
 
     /// Every entry the tree would show if all its folders were open: what a search looks through.
@@ -445,21 +531,25 @@ impl Tree {
     }
 
     fn push_rows(&mut self, id: NodeId, depth: usize) {
-        let Some(children) = self.nodes[id.0].children.clone() else {
-            return;
-        };
+        let (shown, cut) = self.visible_children(id);
 
-        for child in children {
-            if !self.is_visible(child) {
-                continue;
-            }
-
+        for child in shown {
             let descend = self.is_open(child);
-            self.rows.push(Row { id: child, depth });
+            self.rows.push(Row {
+                depth,
+                kind: RowKind::Entry(child),
+            });
 
             if descend {
                 self.push_rows(child, depth + 1);
             }
+        }
+
+        if cut > 0 {
+            self.rows.push(Row {
+                depth,
+                kind: RowKind::More(cut),
+            });
         }
     }
 
@@ -512,7 +602,7 @@ impl Tree {
         let mut candidate = Some(self.selected);
 
         while let Some(id) = candidate {
-            if let Some(row) = self.rows.iter().position(|row| row.id == id) {
+            if let Some(row) = self.rows.iter().position(|row| row.entry() == Some(id)) {
                 self.selected = id;
                 self.selected_row = row;
                 return;
@@ -520,20 +610,48 @@ impl Tree {
             candidate = self.nodes[id.0].parent;
         }
 
-        self.selected = self.rows.first().map_or(ROOT, |row| row.id);
+        self.selected = self.rows.first().and_then(Row::entry).unwrap_or(ROOT);
         self.selected_row = 0;
     }
 
+    /// A marker row cannot hold the cursor, so landing on one carries on past it the way the
+    /// cursor was already going, and only turns back when that runs out of rows.
     pub fn select_row(&mut self, row: usize) {
-        if let Some(row_entry) = self.rows.get(row) {
-            self.selected = row_entry.id;
-            self.selected_row = row;
+        let Some(row) = self.nearest_entry(row, row >= self.selected_row) else {
+            return;
+        };
+
+        self.selected = self.rows[row].entry().expect("an entry row");
+        self.selected_row = row;
+    }
+
+    fn nearest_entry(&self, from: usize, downwards: bool) -> Option<usize> {
+        if self.rows.is_empty() {
+            return None;
+        }
+
+        let is_entry = |row: &usize| self.rows[*row].entry().is_some();
+
+        let below = (from..self.rows.len()).find(is_entry);
+        let above = (0..=from.min(self.rows.len() - 1)).rev().find(is_entry);
+
+        match downwards {
+            true => below.or(above),
+            false => above.or(below),
         }
     }
 
+    /// Puts the cursor on a node, falling back to its nearest visible ancestor. Which entries the
+    /// display cap leaves out depends on where the cursor is, so a node with no row of its own
+    /// gets one from the rebuild rather than being passed over.
     pub fn select(&mut self, id: NodeId) {
         self.selected = id;
-        self.reconcile_selection();
+        self.rows_dirty |= !self.rows.iter().any(|row| row.entry() == Some(id));
+
+        match self.rows_dirty {
+            true => self.refresh_rows(),
+            false => self.reconcile_selection(),
+        }
     }
 
     pub fn move_by(&mut self, delta: isize) {
@@ -624,12 +742,176 @@ mod tests {
         tree
     }
 
-    fn visible(tree: &mut Tree) -> Vec<&str> {
+    fn visible(tree: &mut Tree) -> Vec<String> {
         tree.refresh_rows();
         tree.rows()
             .iter()
-            .map(|row| tree.node(row.id).name.as_str())
+            .map(|row| match row.kind {
+                RowKind::Entry(id) => tree.node(id).name.clone(),
+                RowKind::More(cut) => format!("…{cut}"),
+            })
             .collect()
+    }
+
+    /// root { big { one.rs, .two.rs, three.rs, four.rs } }
+    fn crowded() -> Tree {
+        let mut tree = Tree::new(PathBuf::from("/root"));
+
+        tree.graft(ROOT, vec![entry("big", Kind::Dir)]);
+        let big = find(&tree, "big");
+
+        tree.graft(
+            big,
+            vec![
+                entry("one.rs", Kind::File),
+                entry(".two.rs", Kind::File),
+                entry("three.rs", Kind::File),
+                entry("four.rs", Kind::File),
+            ],
+        );
+        tree.set_expanded(big, true);
+
+        tree
+    }
+
+    #[test]
+    fn a_folder_past_the_cap_shows_what_it_left_out() {
+        let mut tree = crowded();
+        tree.set_max_children(2);
+
+        assert_eq!(visible(&mut tree), ["big", "one.rs", "three.rs", "…1"]);
+    }
+
+    #[test]
+    fn the_cap_counts_only_the_entries_a_folder_shows() {
+        let mut tree = crowded();
+        tree.set_max_children(2);
+        tree.set_filter(Filter {
+            show_hidden: true,
+            ..Filter::default()
+        });
+
+        assert_eq!(visible(&mut tree), ["big", "one.rs", ".two.rs", "…2"]);
+    }
+
+    #[test]
+    fn no_cap_is_set_by_default() {
+        let mut tree = crowded();
+
+        assert_eq!(visible(&mut tree), ["big", "one.rs", "three.rs", "four.rs"]);
+    }
+
+    #[test]
+    fn the_cursor_steps_over_the_marker_the_way_it_was_going() {
+        let mut tree = Tree::new(PathBuf::from("/root"));
+        tree.set_max_children(2);
+
+        tree.graft(
+            ROOT,
+            vec![entry("big", Kind::Dir), entry("after.rs", Kind::File)],
+        );
+        let big = find(&tree, "big");
+
+        tree.graft(
+            big,
+            vec![
+                entry("one.rs", Kind::File),
+                entry("two.rs", Kind::File),
+                entry("three.rs", Kind::File),
+            ],
+        );
+        tree.set_expanded(big, true);
+
+        assert_eq!(
+            visible(&mut tree),
+            ["big", "one.rs", "two.rs", "…1", "after.rs"]
+        );
+
+        tree.select(find(&tree, "two.rs"));
+        tree.move_by(1);
+        assert_eq!(tree.node(tree.selected()).name, "after.rs");
+
+        tree.move_by(-1);
+        assert_eq!(tree.node(tree.selected()).name, "two.rs");
+    }
+
+    #[test]
+    fn the_marker_cannot_take_the_cursor_at_the_end_of_the_tree() {
+        let mut tree = crowded();
+        tree.set_max_children(1);
+        tree.refresh_rows();
+
+        tree.move_last();
+
+        assert_eq!(tree.node(tree.selected()).name, "one.rs");
+    }
+
+    #[test]
+    fn only_the_children_on_screen_are_worth_reading_ahead_into() {
+        let mut tree = crowded();
+        tree.set_max_children(2);
+        let big = find(&tree, "big");
+
+        let shown: Vec<&str> = tree
+            .shown_children(big)
+            .iter()
+            .map(|id| tree.node(*id).name.as_str())
+            .collect();
+
+        assert_eq!(shown, ["one.rs", "three.rs"]);
+    }
+
+    #[test]
+    fn the_cap_never_takes_the_cursor_off_screen() {
+        let mut tree = crowded();
+        tree.set_max_children(1);
+        let four = find(&tree, "four.rs");
+
+        tree.select(four);
+
+        assert_eq!(tree.selected(), four, "the cap is display only");
+        assert_eq!(visible(&mut tree), ["big", "one.rs", "four.rs", "…1"]);
+    }
+
+    #[test]
+    fn the_cap_keeps_the_folder_the_cursor_is_inside() {
+        let mut tree = Tree::new(PathBuf::from("/root"));
+        tree.set_max_children(1);
+
+        tree.graft(
+            ROOT,
+            vec![
+                entry("a.rs", Kind::File),
+                entry("b.rs", Kind::File),
+                entry("deep", Kind::Dir),
+            ],
+        );
+        let deep = find(&tree, "deep");
+
+        tree.graft(deep, vec![entry("inner.rs", Kind::File)]);
+        tree.set_expanded(deep, true);
+
+        tree.select(find(&tree, "inner.rs"));
+
+        assert_eq!(visible(&mut tree), ["a.rs", "deep", "inner.rs", "…1"]);
+    }
+
+    #[test]
+    fn the_result_count_leaves_out_what_the_cap_hides() {
+        let mut tree = crowded();
+        tree.set_max_children(1);
+
+        let matches = vec![
+            find(&tree, "one.rs"),
+            find(&tree, "three.rs"),
+            find(&tree, "four.rs"),
+        ];
+        tree.set_search(Some(matches));
+        tree.select(find(&tree, "big"));
+        tree.refresh_rows();
+
+        assert_eq!(visible(&mut tree), ["big", "one.rs", "…2"]);
+        assert_eq!(tree.match_count(), 1, "only the results with a row count");
     }
 
     #[test]

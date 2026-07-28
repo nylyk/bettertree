@@ -8,6 +8,8 @@ scrolloff = 10                # keep this many lines of context above/below the 
 icons = "nerdfont"            # "nerdfont" = file-type glyphs, "unicode" = ▸/▾ only, "none" = +/-
 sort_order = "folders_first"  # "folders_first" | "mixed" | "files_first" | "type"
 show_diffstat = true          # per-file +n -m on tree rows
+max_children = 1000           # entries one folder shows before "… n more entries …"; 0 = no limit
+max_expand_all = 20000        # entries one expand_all opens before it gives up; 0 = no limit
 indent = 2
 watch = true                  # watch the loaded tree for filesystem changes
 
