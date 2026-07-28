@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::ffi::OsString;
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -12,7 +13,9 @@ use crate::commands::{Command, REGISTRY};
 use crate::config::{Config, Toggles};
 use crate::editor;
 use crate::events::{Event, Events};
+use crate::foreground;
 use crate::git::{self, GitInfo, Ignores};
+use crate::opener;
 use crate::search::{self, Search};
 use crate::state::State;
 use crate::tree::scan::{Entry, Scanner};
@@ -54,7 +57,7 @@ pub struct App {
     ignores: Ignores,
     watcher: Watcher,
     viewport_height: usize,
-    pending_open: Option<PathBuf>,
+    pending_foreground: Option<Vec<OsString>>,
     quit: bool,
 }
 
@@ -90,7 +93,7 @@ impl App {
             events,
             scanner,
             viewport_height: 1,
-            pending_open: None,
+            pending_foreground: None,
             quit: false,
         }
     }
@@ -128,14 +131,14 @@ impl App {
                 Event::FsChange(paths) => self.fs_change(paths),
             }
 
-            if let Some(path) = self.pending_open.take() {
+            if let Some(argv) = self.pending_foreground.take() {
                 self.save();
 
                 self.events.suspend();
-                let opened = editor::open(terminal, &path, &self.config.editor);
+                let ran = foreground::run(terminal, &argv);
                 self.events.resume();
 
-                if let Err(err) = opened {
+                if let Err(err) = ran {
                     self.message = Some(format!("{err:#}"));
                 }
                 self.refresh_git();
@@ -393,7 +396,7 @@ impl App {
         let node = self.tree.node(id);
 
         if !node.kind.is_dir() {
-            self.open_selected();
+            self.edit_selected();
             return;
         }
 
@@ -403,15 +406,43 @@ impl App {
         }
     }
 
+    fn edit_selected(&mut self) {
+        let Some(path) = self.selected_file() else {
+            return;
+        };
+
+        match editor::command(&self.config.editor, &path) {
+            Ok(argv) => self.pending_foreground = Some(argv),
+            Err(err) => self.message = Some(format!("{err:#}")),
+        }
+    }
+
+    /// A handler that wants a terminal gets this one, the way the editor does. Everything else is
+    /// a desktop application and is launched away from the terminal.
     fn open_selected(&mut self) {
+        let Some(path) = self.selected_file() else {
+            return;
+        };
+
+        if let Some(argv) = opener::terminal_command(&path) {
+            self.pending_foreground = Some(argv);
+            return;
+        }
+
+        if let Err(err) = opener::open(&path) {
+            self.message = Some(format!("{err:#}"));
+        }
+    }
+
+    fn selected_file(&mut self) -> Option<PathBuf> {
         let node = self.tree.node(self.tree.selected());
 
         if node.kind.is_dir() {
             self.message = Some("not a file".to_owned());
-            return;
+            return None;
         }
 
-        self.pending_open = Some(node.path.clone());
+        Some(node.path.clone())
     }
 
     fn expand_all(&mut self) {

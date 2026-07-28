@@ -18,7 +18,9 @@ decorations, and drive every action through a `:command` bar with fuzzy completi
 | `src/command_line.rs` | The `:` prompt: input and completion |
 | `src/search.rs` | The `/` prompt: query input, fuzzy matching against the tree |
 | `src/state.rs` | Per-project persisted state (expanded folders, toggles, selection) |
-| `src/editor.rs` | Suspend TUI, run `$EDITOR`, restore |
+| `src/foreground.rs` | Hand this terminal to a child process and restore the TUI after it |
+| `src/editor.rs` | Resolve the configured editor (or `$EDITOR`) into a command line |
+| `src/opener.rs` | `:open`: the desktop launcher, and the command line of a terminal handler |
 | `src/clipboard.rs` | OSC 52 copy, so yanking works over SSH |
 | `src/ui/` | Status bar, tree rows, command bar, help overlay, icons |
 
@@ -44,6 +46,11 @@ decorations, and drive every action through a `:command` bar with fuzzy completi
   `Events::suspend()` first: the input thread has to be off stdin, or it and the child split the
   user's keystrokes. And do *not* leave the alternate screen, the child switches to it itself, so
   staying put keeps the shell from flashing into view.
+- **A child either gets this terminal or is kept away from it, never in between.** Foreground
+  children (the editor, a handler whose desktop entry says `Terminal=true`) go through
+  `pending_foreground` so the event loop runs them via `foreground::run`. Everything else is
+  spawned by `opener::open` with null streams *and* `setsid`: null streams alone do not stop a
+  child from opening `/dev/tty` and stealing the keys.
 
 ## Code style
 

@@ -37,7 +37,8 @@ Some essentials:
 | --- | --- |
 | `j` / `k` | Move down / up |
 | `h` | Move to the containing folder |
-| `enter` | Expand or collapse a folder, or open a file |
+| `enter` | Expand or collapse a folder, or open a file in `$EDITOR` |
+| `o` | Open the file in its default application |
 | `e` / `c` | Expand / collapse everything under the folder |
 | `.` `i` `m` | Toggle dotfiles / gitignored / changed-only |
 | `/` | Search |

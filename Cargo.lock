@@ -76,6 +76,7 @@ dependencies = [
  "crossterm",
  "etcetera",
  "gix",
+ "libc",
  "notify",
  "nucleo-matcher",
  "ratatui",

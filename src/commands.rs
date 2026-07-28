@@ -142,7 +142,7 @@ pub const REGISTRY: &[Entry] = &[
         Command::Open,
         "open",
         None,
-        "Open the focused file in the editor",
+        "Open the focused file in its default application",
     ),
     entry(
         Command::ExpandAll,

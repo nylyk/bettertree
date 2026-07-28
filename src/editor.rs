@@ -1,43 +1,21 @@
-use std::io::stdout;
+use std::ffi::OsString;
 use std::path::Path;
-use std::process::Command;
 
-use anyhow::{Context, Result, bail};
-use crossterm::cursor::{Hide, Show};
-use crossterm::execute;
-use crossterm::terminal::{EnterAlternateScreen, disable_raw_mode, enable_raw_mode};
-use ratatui::DefaultTerminal;
+use anyhow::{Result, bail};
 
-/// Runs the editor in this terminal and restores the TUI afterwards.
-///
-/// The alternate screen is deliberately *not* left first: the editor switches to it itself, so
-/// staying put means the shell never becomes visible in between. Callers must hand over stdin
-/// first, see `Events::suspend`.
-pub fn open(terminal: &mut DefaultTerminal, path: &Path, configured: &str) -> Result<()> {
-    let command = resolve(configured);
-    let mut parts = command.split_whitespace();
+/// The command line that opens `path` in the configured editor.
+pub fn command(configured: &str, path: &Path) -> Result<Vec<OsString>> {
+    let mut argv: Vec<OsString> = resolve(configured)
+        .split_whitespace()
+        .map(OsString::from)
+        .collect();
 
-    let Some(program) = parts.next() else {
+    if argv.is_empty() {
         bail!("no editor configured and $EDITOR is unset");
-    };
-    let args: Vec<&str> = parts.collect();
-
-    disable_raw_mode()?;
-    execute!(stdout(), Show)?;
-
-    let status = Command::new(program).args(args).arg(path).status();
-
-    // An editor that used the alternate screen has just left it, so claim it back either way.
-    enable_raw_mode()?;
-    execute!(stdout(), EnterAlternateScreen, Hide)?;
-    terminal.clear()?;
-
-    let status = status.with_context(|| format!("failed to run {program}"))?;
-    if !status.success() {
-        bail!("{program} exited with {status}");
     }
+    argv.push(path.into());
 
-    Ok(())
+    Ok(argv)
 }
 
 fn resolve(configured: &str) -> String {
